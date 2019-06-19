@@ -32,7 +32,7 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
             using (var serviceScope = host.Services.CreateScope())
             {
                 var services = serviceScope.ServiceProvider;
-                await EnsureDatabasesMigrated<TIdentityDbContext, TIdentityServerDbContext, TPersistedGrantDbContext, TLogDbContext>(services);
+                //await EnsureDatabasesMigrated<TIdentityDbContext, TIdentityServerDbContext, TPersistedGrantDbContext, TLogDbContext>(services);
                 await EnsureSeedData<TIdentityServerDbContext, TUser, TRole>(services);
             }
         }
@@ -124,7 +124,7 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
         private static async Task EnsureSeedIdentityServerData<TIdentityServerDbContext>(TIdentityServerDbContext context, IAdminConfiguration adminConfiguration)
             where TIdentityServerDbContext : DbContext, IAdminConfigurationDbContext
         {
-            if (!context.Clients.Any())
+            if (!context.Clients.Any(t => t.ClientId == adminConfiguration.ClientId))
             {
                 foreach (var client in Clients.GetAdminClient(adminConfiguration).ToList())
                 {
@@ -134,7 +134,7 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                 await context.SaveChangesAsync();
             }
 
-            if (!context.IdentityResources.Any())
+            if (!context.IdentityResources.Any(t => t.Name == "roles"))
             {
                 var identityResources = ClientResources.GetIdentityResources().ToList();
 
@@ -146,15 +146,15 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                 await context.SaveChangesAsync();
             }
 
-            if (!context.ApiResources.Any())
-            {
-                foreach (var resource in ClientResources.GetApiResources(adminConfiguration).ToList())
-                {
-                    await context.ApiResources.AddAsync(resource.ToEntity());
-                }
+            // if (!context.ApiResources.Any())
+            // {
+            //     foreach (var resource in ClientResources.GetApiResources().ToList())
+            //     {
+            //         await context.ApiResources.AddAsync(resource.ToEntity());
+            //     }
 
-                await context.SaveChangesAsync();
-            }
+            //     await context.SaveChangesAsync();
+            // }
         }
     }
 }

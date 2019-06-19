@@ -10,10 +10,16 @@ namespace Skoruba.IdentityServer4.Admin.Configuration.IdentityServer
         {
             return new[]
             {
-                new IdentityResources.OpenId(),
-                new IdentityResources.Profile(),
-                new IdentityResources.Email(),
-                new IdentityResource("roles", "Roles", new[] {"role"})
+                // some standard scopes from the OIDC spec
+                // new IdentityResources.OpenId(),
+                //                 new IdentityResources.Profile(),
+                //                 new IdentityResources.Email(),
+
+                // // custom identity resource with some consolidated claims
+                // new IdentityResource("custom.profile", new[] { JwtClaimTypes.Name, JwtClaimTypes.Email, "location" }),
+
+                // add additional identity resource
+                new IdentityResource("roles", "Roles", new[] { "role" })
             };
         }
 

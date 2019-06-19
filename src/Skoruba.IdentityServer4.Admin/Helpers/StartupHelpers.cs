@@ -168,7 +168,8 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
             {
                 ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
             });
-            app.UseHsts(options => options.MaxAge(days: 365));
+            //app.UseHsts(options => options.MaxAge(days: 365));
+            
             app.UseXXssProtection(options => options.EnabledWithBlockMode());
             app.UseXContentTypeOptions();
             app.UseXfo(options => options.SameOrigin());
@@ -439,11 +440,11 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                     .AddOpenIdConnect(AuthenticationConsts.OidcAuthenticationScheme, options =>
                     {
                         options.Authority = adminConfiguration.IdentityServerBaseUrl;
-#if DEBUG
+// #if DEBUG
                         options.RequireHttpsMetadata = false;
-#else
-                        options.RequireHttpsMetadata = true;
-#endif
+// #else
+//                         options.RequireHttpsMetadata = true;
+// #endif
                         options.ClientId = adminConfiguration.ClientId;
                         options.ClientSecret = adminConfiguration.ClientSecret;
                         options.ResponseType = adminConfiguration.OidcResponseType;
