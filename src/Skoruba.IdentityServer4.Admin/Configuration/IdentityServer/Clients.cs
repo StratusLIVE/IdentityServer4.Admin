@@ -44,25 +44,25 @@ namespace Skoruba.IdentityServer4.Admin.Configuration.IdentityServer
                         IdentityServerConstants.StandardScopes.Email,
                         "roles"
                     }
-                },
+                }//,
 
-                new Client
-                {
-                    ClientId = adminConfiguration.IdentityAdminApiSwaggerUIClientId,
-                    ClientName = adminConfiguration.IdentityAdminApiSwaggerUIClientId,
+                // new Client
+                // {
+                //     ClientId = adminConfiguration.IdentityAdminApiSwaggerUIClientId,
+                //     ClientName = adminConfiguration.IdentityAdminApiSwaggerUIClientId,
                     
-                    AllowedGrantTypes = GrantTypes.Implicit,
+                //     AllowedGrantTypes = GrantTypes.Implicit,
 
-                    RedirectUris = new List<string>
-                    {
-                        adminConfiguration.IdentityAdminApiSwaggerUIRedirectUrl
-                    },
-                    AllowedScopes =
-                    {
-                        adminConfiguration.IdentityAdminApiScope
-                    },
-                    AllowAccessTokensViaBrowser = true
-                }
+                //     RedirectUris = new List<string>
+                //     {
+                //         adminConfiguration.IdentityAdminApiSwaggerUIRedirectUrl
+                //     },
+                //     AllowedScopes =
+                //     {
+                //         adminConfiguration.IdentityAdminApiScope
+                //     },
+                //     AllowAccessTokensViaBrowser = true
+                // }
             };
 
         }
