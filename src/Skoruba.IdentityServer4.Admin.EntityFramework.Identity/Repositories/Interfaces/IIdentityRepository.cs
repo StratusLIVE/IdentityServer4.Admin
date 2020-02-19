@@ -21,6 +21,7 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.In
         Task<bool> ExistsRoleAsync(string roleId);
 
         Task<PagedList<TUser>> GetUsersAsync(string search, int page = 1, int pageSize = 10);
+        Task<PagedList<TUser>> GetUnconfirmedUsersAsync(string search, int page = 1, int pageSize = 10);
 
         Task<PagedList<TUser>> GetRoleUsersAsync(string roleId, string search, int page = 1, int pageSize = 10);
 

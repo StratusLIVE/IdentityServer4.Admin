@@ -31,6 +31,7 @@
         <!--Button-->
         <div class="form-group row">
             <div class="col-md-12 col-m-b-10  col-m-t-10">
+                <a asp-action="ResendConfirmationEmail" asp-route-id="@Model.Id" class="btn btn-outline-primary">Resend Confirmation Email</a>
                 <a asp-action="UserClaims" asp-route-id="@Model.Id" class="btn btn-outline-primary">@Localizer["ButtonManageUserClaims"]</a>
                 <a asp-action="UserRoles" asp-route-id="@Model.Id" class="btn btn-outline-primary">@Localizer["ButtonManageUserRoles"]</a>
                 <a asp-action="UserProviders" asp-route-id="@Model.Id" class="btn btn-outline-primary">@Localizer["ButtonManageUserExternalProviders"]</a>

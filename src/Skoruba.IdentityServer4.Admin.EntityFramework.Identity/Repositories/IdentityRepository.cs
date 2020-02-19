@@ -93,6 +93,21 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             return pagedList;
         }
 
+        public virtual async Task<PagedList<TUser>> GetUnconfirmedUsersAsync(string search, int page = 1, int pageSize = 10)
+        {
+            var pagedList = new PagedList<TUser>();
+            Expression<Func<TUser, bool>> searchCondition = x => x.UserName.Contains(search) || x.Email.Contains(search);
+
+            var users = await UserManager.Users.WhereIf(!string.IsNullOrEmpty(search), searchCondition).Where(t => !t.EmailConfirmed).PageBy(x => x.Id, page, pageSize).ToListAsync();
+
+            pagedList.Data.AddRange(users);
+
+            pagedList.TotalCount = await UserManager.Users.WhereIf(!string.IsNullOrEmpty(search), searchCondition).CountAsync();
+            pagedList.PageSize = pageSize;
+
+            return pagedList;
+        }
+
         public virtual async Task<PagedList<TUser>> GetRoleUsersAsync(string roleId, string search, int page = 1, int pageSize = 10)
         {
             var id = ConvertRoleKeyFromString(roleId);

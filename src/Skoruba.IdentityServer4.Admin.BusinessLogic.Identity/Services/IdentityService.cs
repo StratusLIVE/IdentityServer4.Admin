@@ -78,6 +78,14 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             return usersDto;
         }
 
+        public virtual async Task<TUsersDto> GetUnconfirmedUsersAsync(string search, int page = 1, int pageSize = 10)
+        {
+            var pagedList = await IdentityRepository.GetUnconfirmedUsersAsync(search, page, pageSize);
+            var usersDto = Mapper.Map<TUsersDto>(pagedList);
+
+            return usersDto;
+        }
+
         public virtual async Task<TUsersDto> GetRoleUsersAsync(string roleId, string search, int page = 1, int pageSize = 10)
         {
             var roleKey = ConvertToKeyFromString(roleId);

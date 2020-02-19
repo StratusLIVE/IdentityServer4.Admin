@@ -6,6 +6,6 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity.Int
     {
         int PageSize { get; set; }
         int TotalCount { get; set; }
-        List<IUserDto> Users { get; }
+        List<IUserDto> Users { get; }        
     }
 }

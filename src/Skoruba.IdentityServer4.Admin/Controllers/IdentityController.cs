@@ -1,15 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfaces;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Shared.Dtos.Common;
 using Skoruba.IdentityServer4.Admin.Configuration.Constants;
+using Skoruba.IdentityServer4.Admin.Configuration.Interfaces;
 using Skoruba.IdentityServer4.Admin.ExceptionHandling;
 using Skoruba.IdentityServer4.Admin.Helpers.Localization;
 
@@ -19,7 +24,7 @@ namespace Skoruba.IdentityServer4.Admin.Controllers
     [TypeFilter(typeof(ControllerExceptionFilterAttribute))]
     public class IdentityController<TUserDto, TUserDtoKey, TRoleDto, TRoleDtoKey, TUserKey, TRoleKey, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
             TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-            TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto> : BaseController
+            TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserEmailDto> : BaseController
         where TUserDto : UserDto<TUserDtoKey>, new()
         where TRoleDto : RoleDto<TRoleDtoKey>, new()
         where TUser : IdentityUser<TKey>
@@ -40,13 +45,15 @@ namespace Skoruba.IdentityServer4.Admin.Controllers
         where TUserProvidersDto : UserProvidersDto<TUserDtoKey>
         where TUserChangePasswordDto : UserChangePasswordDto<TUserDtoKey>
         where TRoleClaimsDto : RoleClaimsDto<TRoleDtoKey>
+        where TUserEmailDto : UserEmailDto<TUserDtoKey>
     {
         private readonly IIdentityService<TUserDto, TUserDtoKey, TRoleDto, TRoleDtoKey, TUserKey, TRoleKey, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
             TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
             TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto> _identityService;
         private readonly IGenericControllerLocalizer<IdentityController<TUserDto, TUserDtoKey, TRoleDto, TRoleDtoKey, TUserKey, TRoleKey, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
             TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-            TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto>> _localizer;
+            TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserEmailDto>> _localizer;
+        private IRootConfiguration _configuration;
 
         public IdentityController(IIdentityService<TUserDto, TUserDtoKey, TRoleDto, TRoleDtoKey, TUserKey, TRoleKey, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
                 TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
@@ -54,10 +61,11 @@ namespace Skoruba.IdentityServer4.Admin.Controllers
             ILogger<ConfigurationController> logger,
             IGenericControllerLocalizer<IdentityController<TUserDto, TUserDtoKey, TRoleDto, TRoleDtoKey, TUserKey, TRoleKey, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
                 TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-                TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto>> localizer) : base(logger)
+                TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserEmailDto>> localizer, IRootConfiguration configuration) : base(logger)
         {
             _identityService = identityService;
             _localizer = localizer;
+            _configuration = configuration;
         }
 
         [HttpGet]
@@ -114,10 +122,19 @@ namespace Skoruba.IdentityServer4.Admin.Controllers
         [HttpGet]
         public async Task<IActionResult> Users(int? page, string search)
         {
-            ViewBag.Search = search;
+            ViewBag.Search = search;            
             var usersDto = await _identityService.GetUsersAsync(search, page ?? 1);
 
             return View(usersDto);
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> UnconfirmedUsers(int? page, string search)
+        {
+            ViewBag.Search = search;
+            var usersDto = await _identityService.GetUnconfirmedUsersAsync(search, page ?? 1);
+
+            return View("Users", usersDto);            
         }
 
         [HttpGet]
@@ -252,6 +269,45 @@ namespace Skoruba.IdentityServer4.Admin.Controllers
 
             return View(claims);
         }
+        [HttpGet]
+        public async Task<IActionResult> ResendConfirmationEmail(TUserDtoKey id)
+        {
+            if (EqualityComparer<TUserDtoKey>.Default.Equals(id, default)) return NotFound();
+            var userDto = await _identityService.GetUserAsync(id.ToString());
+            var emailDto = new UserEmailDto<TUserDtoKey>();
+            emailDto.UserId = id;
+            emailDto.UserName = userDto.UserName;
+            return View(emailDto);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> ResendConfirmationEmail(TUserEmailDto userEmail)
+        {
+
+            if (!ModelState.IsValid)
+            {
+                return View(userEmail);
+            }
+            var accessToken = await HttpContext.GetTokenAsync("access_token");
+            var identityServer = _configuration.AdminConfiguration.IdentityServerBaseUrl;
+            var user = await _identityService.GetUserAsync(userEmail.UserId.ToString());
+
+            // TokenClient            
+            var emailApiClient = new HttpClient();
+            emailApiClient.BaseAddress = new Uri(identityServer + "/api/");
+            emailApiClient.SetBearerToken(accessToken);//tokenResponse.AccessToken);
+            var template = new EmailDto() { UserId = userEmail.UserId.ToString(), TemplateName = "Welcome", RedirectUrl = userEmail.RedirectUrl };
+            var json = JsonConvert.SerializeObject(template);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var result = await emailApiClient.PostAsync("email", content);
+
+            if (result.IsSuccessStatusCode)
+                SuccessNotification(string.Format("Confirmation email sent to {0}", user.Email), _localizer["SuccessTitle"]);
+            else
+                CreateNotification(Helpers.NotificationHelpers.AlertType.Error, string.Format("Confirmation email failed to send: {0}", result.RequestMessage), "Failed");
+
+            return RedirectToAction("UserProfile", new { Id = userEmail.UserId });
+        }        
 
         [HttpGet]
         public async Task<IActionResult> UserClaimsDelete(TUserDtoKey id, int claimId)
@@ -435,4 +491,11 @@ namespace Skoruba.IdentityServer4.Admin.Controllers
             return View(user);
         }
     }
+
+    public class EmailDto
+    {
+        public string UserId { get; set; }
+        public string TemplateName { get; set; }
+        public string RedirectUrl { get; set; }
+    }    
 }

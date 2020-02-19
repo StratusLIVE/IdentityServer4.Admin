@@ -6,16 +6,16 @@
 @{
     ViewBag.Title = Localizer["Title"];
     Layout = "_Layout";
+    var action = ViewContext.RouteData.Values["Action"].ToString();
 }
 
 <h2>@Localizer["Title"]</h2>
 
 <a asp-action="UserProfile" class="btn btn-outline-primary mb-3 mt-3"><span class="oi oi-plus"></span> @Localizer["ActionAddUser"]</a>
-
 <div class="row">
     <div class="col-12">
-        @await Html.PartialAsync("Common/Search", new Search() { Action = "Users", Controller = "Identity" })
-    </div>
+        @await Html.PartialAsync("Common/Search", new Search() { Action = action, Controller = "Identity" })
+    </div>    
 </div>
 
 <div class="row">
@@ -59,6 +59,6 @@
 
 <div class="row">
     <div class="col-12">
-        @await Html.PartialAsync("Common/Pager", new Pager { Action = "Users", PageSize = Model.PageSize, TotalCount = Model.TotalCount, EnableSearch = true, Search = ViewBag.Search })
+        @await Html.PartialAsync("Common/Pager", new Pager { Action = action, PageSize = Model.PageSize, TotalCount = Model.TotalCount, EnableSearch = true, Search = ViewBag.Search })
     </div>
 </div>
