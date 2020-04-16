@@ -37,6 +37,7 @@ using Skoruba.IdentityServer4.Admin.EntityFramework.Interfaces;
 using Skoruba.IdentityServer4.Admin.Helpers.Localization;
 using Newtonsoft.Json.Linq;
 using System.Security.Claims;
+using System.Linq;
 
 namespace Skoruba.IdentityServer4.Admin.Helpers
 {
@@ -480,20 +481,15 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                         {
                             OnMessageReceived = OnMessageReceived,
                             OnRedirectToIdentityProvider = n => OnRedirectToIdentityProvider(n, adminConfiguration),
+                            
                             OnUserInformationReceived = async context => 
                             {
-                                if (context.User.TryGetValue(JwtClaimTypes.Email, out JToken email))
+                                var emailClaims = context.Principal.Claims.Where(x => x.Type.Equals(JwtClaimTypes.Email)).ToList();
+                                if (emailClaims.Count > 1)
                                 {
-                                    var claims = new List<Claim>();
-                                    if (email.Type != JTokenType.Array) 
-                                    {
-                                        claims.Add(new Claim(JwtClaimTypes.Email, (string)email));
-                                    }
-                                    else  
-                                    {
-                                        foreach (var r in email)
-                                            claims.Add(new Claim(JwtClaimTypes.Email, (string)r));
-                                    }
+                                    var email = emailClaims.FirstOrDefault();
+                                    context.User.Remove(JwtClaimTypes.Email);
+                                    context.User.Add(JwtClaimTypes.Email, new JValue(email?.Value));
                                 }
                             }
                         };
