@@ -450,6 +450,12 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                         options.ClientSecret = adminConfiguration.ClientSecret;
                         options.ResponseType = adminConfiguration.OidcResponseType;
 
+                        if(!hostingEnvironment.IsDevelopment())
+                        {
+                            options.NonceCookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
+                            options.CorrelationCookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
+                        }
+
                         options.Scope.Clear();
                         foreach (var scope in adminConfiguration.Scopes)
                         {
