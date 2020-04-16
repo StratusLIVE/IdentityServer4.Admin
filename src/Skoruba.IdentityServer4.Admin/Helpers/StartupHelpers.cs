@@ -35,6 +35,8 @@ using Skoruba.IdentityServer4.Admin.Configuration.Constants;
 using Skoruba.IdentityServer4.Admin.Configuration.Interfaces;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Interfaces;
 using Skoruba.IdentityServer4.Admin.Helpers.Localization;
+using Newtonsoft.Json.Linq;
+using System.Security.Claims;
 
 namespace Skoruba.IdentityServer4.Admin.Helpers
 {
@@ -477,7 +479,23 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                         options.Events = new OpenIdConnectEvents
                         {
                             OnMessageReceived = OnMessageReceived,
-                            OnRedirectToIdentityProvider = n => OnRedirectToIdentityProvider(n, adminConfiguration)
+                            OnRedirectToIdentityProvider = n => OnRedirectToIdentityProvider(n, adminConfiguration),
+                            OnUserInformationReceived = async context => 
+                            {
+                                if (context.User.TryGetValue(JwtClaimTypes.Email, out JToken email))
+                                {
+                                    var claims = new List<Claim>();
+                                    if (email.Type != JTokenType.Array) 
+                                    {
+                                        claims.Add(new Claim(JwtClaimTypes.Email, (string)email));
+                                    }
+                                    else  
+                                    {
+                                        foreach (var r in email)
+                                            claims.Add(new Claim(JwtClaimTypes.Email, (string)r));
+                                    }
+                                }
+                            }
                         };
                     });
             }
