@@ -484,13 +484,13 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                             
                             OnUserInformationReceived = async context => 
                             {
-                                var emailClaims = context.Principal.Claims.Where(x => x.Type.Equals(JwtClaimTypes.Email)).ToList();
-                                if (emailClaims.Count > 1)
-                                {
-                                    var email = emailClaims.FirstOrDefault();
-                                    context.User.Remove(JwtClaimTypes.Email);
-                                    context.User.Add(JwtClaimTypes.Email, new JValue(email?.Value));
-                                }
+                                var user = context.User;
+                                user.TryGetValue(JwtClaimTypes.Email, out JToken emails);
+                                var count = emails.Count();
+                                var email = count > 0 ? emails.First : emails;
+                                var emailString = email?.ToString();
+                                user.Remove(JwtClaimTypes.Email);
+                                user.Add(JwtClaimTypes.Email, new JValue(emailString));
                             }
                         };
                     });
