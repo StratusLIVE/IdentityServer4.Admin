@@ -440,6 +440,10 @@ namespace Skoruba.IdentityServer4.Admin.Helpers
                             
                             // Issue: https://github.com/aspnet/Announcements/issues/318
                             options.Cookie.SameSite = SameSiteMode.None;
+                            if(!hostingEnvironment.IsDevelopment())
+                            {
+                                options.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.Always;
+                            }
                         })
                     .AddOpenIdConnect(AuthenticationConsts.OidcAuthenticationScheme, options =>
                     {
