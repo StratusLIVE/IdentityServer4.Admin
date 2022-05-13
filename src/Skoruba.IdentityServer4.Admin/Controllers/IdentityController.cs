@@ -294,7 +294,7 @@ namespace Skoruba.IdentityServer4.Admin.Controllers
 
             // TokenClient            
             var emailApiClient = new HttpClient();
-            emailApiClient.BaseAddress = new Uri(identityServer + "/api/");
+            emailApiClient.BaseAddress = new Uri(identityServer + "/api/v1/");
             emailApiClient.SetBearerToken(accessToken);//tokenResponse.AccessToken);
             var template = new EmailDto() { UserId = userEmail.UserId.ToString(), TemplateName = "Welcome", RedirectUrl = userEmail.RedirectUrl };
             var json = JsonConvert.SerializeObject(template);
