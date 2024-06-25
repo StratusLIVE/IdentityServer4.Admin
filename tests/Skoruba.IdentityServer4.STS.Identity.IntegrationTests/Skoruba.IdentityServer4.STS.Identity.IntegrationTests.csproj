@@ -1,29 +1,32 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <TargetFramework>netcoreapp2.2</TargetFramework>
-        <PreserveCompilationContext>true</PreserveCompilationContext>
-        <IsPackable>false</IsPackable>
-        <DebugType>Full</DebugType>
-    </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+	</PropertyGroup>
 
-    <ItemGroup>
-        <PackageReference Include="FluentAssertions" Version="5.5.3" />
-        <PackageReference Include="HtmlAgilityPack" Version="1.9.0" />
-        <PackageReference Include="IdentityModel" Version="3.10.6" />
-        <PackageReference Include="Microsoft.AspNetCore.TestHost" Version="2.2.0" />
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="15.9.0" />
-        <PackageReference Include="xunit" Version="2.4.1" />
-        <PackageReference Include="xunit.runner.visualstudio" Version="2.4.1">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
-        </PackageReference>
-        <PackageReference Include="Microsoft.AspNetCore.App" />
-        <DotNetCliToolReference Include="dotnet-xunit" Version="2.3.1" />
-    </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="HtmlAgilityPack" Version="1.11.61" />
+		<PackageReference Include="IdentityModel" Version="7.0.0" />
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.6" />
+		<PackageReference Include="Microsoft.AspNetCore.TestHost" Version="8.0.6" />
+		<PackageReference Update="Microsoft.NET.Test.Sdk" Version="17.10.0" />
+		<PackageReference Update="xunit" Version="2.8.1" />
+		<PackageReference Update="xunit.runner.visualstudio" Version="2.8.1">
+		  <PrivateAssets>all</PrivateAssets>
+		  <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+		</PackageReference>
+	</ItemGroup>
 
-    <ItemGroup>
-        <ProjectReference Include="..\..\src\Skoruba.IdentityServer4.STS.Identity\Skoruba.IdentityServer4.STS.Identity.csproj" />
-    </ItemGroup>
+	<ItemGroup>
+		<DotNetCliToolReference Include="dotnet-xunit" Version="2.3.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\..\src\Skoruba.IdentityServer4.STS.Identity\Skoruba.IdentityServer4.STS.Identity.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <PackageReference Update="FluentAssertions" Version="6.12.0" />
+	</ItemGroup>
 
 </Project>

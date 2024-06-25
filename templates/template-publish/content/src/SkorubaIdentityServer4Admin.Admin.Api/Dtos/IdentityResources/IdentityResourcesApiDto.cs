@@ -16,3 +16,10 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Dtos.IdentityResources
         public List<IdentityResourceApiDto> IdentityResources { get; set; }
     }
 }
+
+
+
+
+
+
+

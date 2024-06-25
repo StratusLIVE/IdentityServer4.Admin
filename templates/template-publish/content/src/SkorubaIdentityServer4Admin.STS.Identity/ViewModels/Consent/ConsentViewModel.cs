@@ -16,6 +16,13 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.ViewModels.Consent
         public bool AllowRememberConsent { get; set; }
 
         public IEnumerable<ScopeViewModel> IdentityScopes { get; set; }
-        public IEnumerable<ScopeViewModel> ResourceScopes { get; set; }
+        public IEnumerable<ScopeViewModel> ApiScopes { get; set; }
     }
 }
+
+
+
+
+
+
+

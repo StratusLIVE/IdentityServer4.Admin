@@ -30,3 +30,10 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Dtos.IdentityResources
         public List<string> UserClaims { get; set; }
     }
 }
+
+
+
+
+
+
+

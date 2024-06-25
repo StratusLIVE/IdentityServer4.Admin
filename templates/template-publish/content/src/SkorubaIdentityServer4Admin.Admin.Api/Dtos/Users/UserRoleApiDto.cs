@@ -1,9 +1,16 @@
 ﻿namespace SkorubaIdentityServer4Admin.Admin.Api.Dtos.Users
 {
-    public class UserRoleApiDto<TUserDtoKey, TRoleDtoKey>
+    public class UserRoleApiDto<TKey>
     {
-        public TUserDtoKey UserId { get; set; }
+        public TKey UserId { get; set; }
 
-        public TRoleDtoKey RoleId { get; set; }
+        public TKey RoleId { get; set; }
     }
 }
+
+
+
+
+
+
+

@@ -1,37 +1,34 @@
 ﻿using System.Net;
-using System.Net.Http;
 using System.Threading.Tasks;
 using FluentAssertions;
 using Skoruba.IdentityServer4.STS.Identity.IntegrationTests.Common;
 using Skoruba.IdentityServer4.STS.Identity.IntegrationTests.Mocks;
+using Skoruba.IdentityServer4.STS.Identity.IntegrationTests.Tests.Base;
 using Xunit;
 
 namespace Skoruba.IdentityServer4.STS.Identity.IntegrationTests.Tests
 {
-    public class GrantsControllerTests : IClassFixture<TestFixture>
+    public class GrantsControllerTests : BaseClassFixture
     {
-        private readonly HttpClient _client;
-
-        public GrantsControllerTests(TestFixture fixture)
+        public GrantsControllerTests(TestFixture fixture) : base(fixture)
         {
-            _client = fixture.Client;
         }
 
         [Fact]
         public async Task AuthorizeUserCanAccessGrantsView()
         {
             // Clear headers
-            _client.DefaultRequestHeaders.Clear();
+            Client.DefaultRequestHeaders.Clear();
 
             // Register new user
             var registerFormData = UserMocks.GenerateRegisterData();
-            var registerResponse = await UserMocks.RegisterNewUserAsync(_client, registerFormData);
+            var registerResponse = await UserMocks.RegisterNewUserAsync(Client, registerFormData);
 
             // Get cookie with user identity for next request
-            _client.PutCookiesOnRequest(registerResponse);
+            Client.PutCookiesOnRequest(registerResponse);
 
             // Act
-            var response = await _client.GetAsync("/Grants/Index");
+            var response = await Client.GetAsync("/Grants/Index");
 
             // Assert
             response.EnsureSuccessStatusCode();
@@ -42,10 +39,10 @@ namespace Skoruba.IdentityServer4.STS.Identity.IntegrationTests.Tests
         public async Task UnAuthorizeUserCannotAccessGrantsView()
         {
             // Clear headers
-            _client.DefaultRequestHeaders.Clear();
+            Client.DefaultRequestHeaders.Clear();
 
             // Act
-            var response = await _client.GetAsync("/Grants/Index");
+            var response = await Client.GetAsync("/Grants/Index");
 
             // Assert      
             response.StatusCode.Should().Be(HttpStatusCode.Redirect);

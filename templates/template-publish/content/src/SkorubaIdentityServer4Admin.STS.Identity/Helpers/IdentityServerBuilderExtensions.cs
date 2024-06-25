@@ -1,11 +1,10 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.IO;
-using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
-using SkorubaIdentityServer4Admin.STS.Identity.Configuration;
+using Skoruba.IdentityServer4.Shared.Configuration.Configuration.Common;
+using Skoruba.IdentityServer4.Shared.Configuration.Helpers;
 
 namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
 {
@@ -23,11 +22,11 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
         /// </summary>
         /// <param name="builder"></param>
         /// <param name="configuration"></param>
-        /// <param name="logger"></param>
         /// <returns></returns>
-        public static IIdentityServerBuilder AddCustomSigningCredential(this IIdentityServerBuilder builder, IConfiguration configuration, ILogger logger)
+        public static IIdentityServerBuilder AddCustomSigningCredential(this IIdentityServerBuilder builder, IConfiguration configuration)
         {
             var certificateConfiguration = configuration.GetSection(nameof(CertificateConfiguration)).Get<CertificateConfiguration>();
+            var azureKeyVaultConfiguration = configuration.GetSection(nameof(AzureKeyVaultConfiguration)).Get<AzureKeyVaultConfiguration>();
 
             if (certificateConfiguration.UseSigningCertificateThumbprint)
             {
@@ -36,10 +35,28 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
                     throw new Exception(SigningCertificateThumbprintNotFound);
                 }
 
-                var certStore = new X509Store(StoreName.My, StoreLocation.LocalMachine);
+                StoreLocation storeLocation = StoreLocation.LocalMachine;
+                bool validOnly = certificateConfiguration.CertificateValidOnly;
+
+                // Parse the Certificate StoreLocation
+                string certStoreLocationLower = certificateConfiguration.CertificateStoreLocation.ToLower();
+                if (certStoreLocationLower == StoreLocation.CurrentUser.ToString().ToLower() ||
+                    certificateConfiguration.CertificateStoreLocation == ((int)StoreLocation.CurrentUser).ToString())
+                {
+                    storeLocation = StoreLocation.CurrentUser;
+                }
+                else if (certStoreLocationLower == StoreLocation.LocalMachine.ToString().ToLower() ||
+                         certStoreLocationLower == ((int)StoreLocation.LocalMachine).ToString())
+                {
+                    storeLocation = StoreLocation.LocalMachine;
+                }
+                else { storeLocation = StoreLocation.LocalMachine; validOnly = true; }
+
+                // Open Certificate
+                var certStore = new X509Store(StoreName.My, storeLocation);
                 certStore.Open(OpenFlags.ReadOnly);
 
-                var certCollection = certStore.Certificates.Find(X509FindType.FindByThumbprint, certificateConfiguration.SigningCertificateThumbprint, true);
+                var certCollection = certStore.Certificates.Find(X509FindType.FindByThumbprint, certificateConfiguration.SigningCertificateThumbprint, validOnly);
                 if (certCollection.Count == 0)
                 {
                     throw new Exception(CertificateNotFound);
@@ -48,6 +65,12 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
                 var certificate = certCollection[0];
 
                 builder.AddSigningCredential(certificate);
+            }
+            else if (certificateConfiguration.UseSigningCertificateForAzureKeyVault)
+            {
+                var x509Certificate2Certs = AzureKeyVaultHelpers.GetCertificates(azureKeyVaultConfiguration).GetAwaiter().GetResult();
+
+                builder.AddSigningCredential(x509Certificate2Certs.ActiveCertificate);
             }
             else if (certificateConfiguration.UseSigningCertificatePfxFile)
             {
@@ -63,9 +86,9 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
                     {
                         builder.AddSigningCredential(new X509Certificate2(certificateConfiguration.SigningCertificatePfxFilePath, certificateConfiguration.SigningCertificatePfxFilePassword));
                     }
-                    catch (CryptographicException e)
+                    catch (Exception e)
                     {
-                        logger.LogError($"There was an error adding the key file - during the creation of the signing key {e.Message}");
+                        throw new Exception("There was an error adding the key file - during the creation of the signing key", e);
                     }
                 }
                 else
@@ -77,6 +100,10 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
             {
                 builder.AddDeveloperSigningCredential();
             }
+            else
+            {
+                throw new Exception("Signing credential is not specified");
+            }
 
             return builder;
         }
@@ -87,11 +114,11 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
         /// </summary>
         /// <param name="builder"></param>
         /// <param name="configuration"></param>
-        /// <param name="logger"></param>
         /// <returns></returns>
-        public static IIdentityServerBuilder AddCustomValidationKey(this IIdentityServerBuilder builder, IConfiguration configuration, ILogger logger)
+        public static IIdentityServerBuilder AddCustomValidationKey(this IIdentityServerBuilder builder, IConfiguration configuration)
         {
             var certificateConfiguration = configuration.GetSection(nameof(CertificateConfiguration)).Get<CertificateConfiguration>();
+            var azureKeyVaultConfiguration = configuration.GetSection(nameof(AzureKeyVaultConfiguration)).Get<AzureKeyVaultConfiguration>();
 
             if (certificateConfiguration.UseValidationCertificateThumbprint)
             {
@@ -114,6 +141,15 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
                 builder.AddValidationKey(certificate);
 
             }
+            else if (certificateConfiguration.UseValidationCertificateForAzureKeyVault)
+            {
+                var x509Certificate2Certs = AzureKeyVaultHelpers.GetCertificates(azureKeyVaultConfiguration).GetAwaiter().GetResult();
+
+                if (x509Certificate2Certs.SecondaryCertificate != null)
+                {
+                    builder.AddValidationKey(x509Certificate2Certs.SecondaryCertificate);
+                }
+            }
             else if (certificateConfiguration.UseValidationCertificatePfxFile)
             {
                 if (string.IsNullOrWhiteSpace(certificateConfiguration.ValidationCertificatePfxFilePath))
@@ -128,14 +164,14 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
                         builder.AddValidationKey(new X509Certificate2(certificateConfiguration.ValidationCertificatePfxFilePath, certificateConfiguration.ValidationCertificatePfxFilePassword));
 
                     }
-                    catch (CryptographicException e)
+                    catch (Exception e)
                     {
-                        logger.LogError($"There was an error adding the key file - during the creation of the validation key {e.Message}");
+                        throw new Exception("There was an error adding the key file - during the creation of the validation key", e);
                     }
                 }
                 else
                 {
-                    throw new Exception($"Validation key file: {certificateConfiguration.SigningCertificatePfxFilePath} not found");
+                    throw new Exception($"Validation key file: {certificateConfiguration.ValidationCertificatePfxFilePath} not found");
                 }
             }
 
@@ -143,3 +179,11 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Helpers
         }
     }
 }
+
+
+
+
+
+
+
+

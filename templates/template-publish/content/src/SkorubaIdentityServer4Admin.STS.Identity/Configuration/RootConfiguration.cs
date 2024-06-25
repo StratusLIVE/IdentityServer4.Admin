@@ -1,17 +1,18 @@
-﻿using Microsoft.Extensions.Options;
-using SkorubaIdentityServer4Admin.STS.Identity.Configuration.Intefaces;
+﻿using Skoruba.IdentityServer4.Shared.Configuration.Configuration.Identity;
+using SkorubaIdentityServer4Admin.STS.Identity.Configuration.Interfaces;
 
 namespace SkorubaIdentityServer4Admin.STS.Identity.Configuration
 {
     public class RootConfiguration : IRootConfiguration
     {      
-        public IAdminConfiguration AdminConfiguration { get; set; }
-        public IRegisterConfiguration RegisterConfiguration { get; }
-
-        public RootConfiguration(IOptions<AdminConfiguration> adminConfiguration, IOptions<RegisterConfiguration> registerConfiguration)
-        {
-            RegisterConfiguration = registerConfiguration.Value;
-            AdminConfiguration = adminConfiguration.Value;
-        }
+        public AdminConfiguration AdminConfiguration { get; } = new AdminConfiguration();
+        public RegisterConfiguration RegisterConfiguration { get; } = new RegisterConfiguration();
     }
 }
+
+
+
+
+
+
+

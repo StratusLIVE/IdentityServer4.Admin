@@ -15,7 +15,6 @@ namespace Skoruba.IdentityServer4.Admin.Api.Dtos.Clients
             AllowedCorsOrigins = new List<string>();
             AllowedGrantTypes = new List<string>();
             Claims = new List<ClientClaimApiDto>();
-            ClientSecrets = new List<ClientSecretApiDto>();
             Properties = new List<ClientPropertyApiDto>();
         }
 
@@ -87,7 +86,6 @@ namespace Skoruba.IdentityServer4.Admin.Api.Dtos.Clients
         public List<string> AllowedScopes { get; set; }
 
         public List<ClientClaimApiDto> Claims { get; set; }
-        public List<ClientSecretApiDto> ClientSecrets { get; set; }
         public List<ClientPropertyApiDto> Properties { get; set; }
 
         public DateTime? Updated { get; set; }
@@ -96,5 +94,11 @@ namespace Skoruba.IdentityServer4.Admin.Api.Dtos.Clients
         public int? UserSsoLifetime { get; set; }
         public string UserCodeType { get; set; }
         public int DeviceCodeLifetime { get; set; } = 300;
+
+        public bool RequireRequestObject { get; set; }
+
+        public List<string> AllowedIdentityTokenSigningAlgorithms { get; set; }
+
+        public bool NonEditable { get; set; }
     }
 }

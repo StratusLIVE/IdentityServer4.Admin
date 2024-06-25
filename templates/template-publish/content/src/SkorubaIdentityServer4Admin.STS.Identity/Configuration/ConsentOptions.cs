@@ -16,3 +16,11 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.Configuration
         public static readonly string InvalidSelectionErrorMessage = "Invalid selection";
     }
 }
+
+
+
+
+
+
+
+

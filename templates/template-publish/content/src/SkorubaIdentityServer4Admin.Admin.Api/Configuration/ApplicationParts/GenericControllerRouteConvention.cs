@@ -19,3 +19,10 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Configuration.ApplicationParts
         }
     }
 }
+
+
+
+
+
+
+
