@@ -39,7 +39,7 @@ namespace Skoruba.IdentityServer4.Admin
                 UserIdentityUserLogin, UserIdentityRoleClaim, UserIdentityUserToken, string,
                 IdentityUserDto, IdentityRoleDto, IdentityUsersDto, IdentityRolesDto, IdentityUserRolesDto,
                 IdentityUserClaimsDto, IdentityUserProviderDto, IdentityUserProvidersDto, IdentityUserChangePasswordDto,
-                IdentityRoleClaimsDto, IdentityUserClaimDto, IdentityRoleClaimDto>(ConfigureUIOptions);
+                IdentityRoleClaimsDto, IdentityUserClaimDto, IdentityRoleClaimDto, IdentityUserEmailDto>(ConfigureUIOptions);
 
             // Monitor changes in Admin UI views
             services.AddAdminUIRazorRuntimeCompilation(HostingEnvironment);

@@ -13,4 +13,9 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity
 
         public string ProviderDisplayName { get; set; }
     }
+    public class UserEmailDto<TUserDtoKey> : BaseUserProviderDto<TUserDtoKey>, IUserEmailDto
+    {
+        public string UserName { get; set; }
+        public string RedirectUrl { get; set; }
+    }
 }

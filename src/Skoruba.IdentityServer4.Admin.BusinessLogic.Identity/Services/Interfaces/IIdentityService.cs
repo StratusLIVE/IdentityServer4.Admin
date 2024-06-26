@@ -9,7 +9,7 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfac
     public interface IIdentityService<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole,
         TUserLogin, TRoleClaim, TUserToken,
         TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto>
+        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto, TUserEmailDto>
         where TUserDto : UserDto<TKey>
         where TUser : IdentityUser<TKey>
         where TRole : IdentityRole<TKey>
@@ -30,6 +30,7 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfac
         where TRoleClaimsDto : RoleClaimsDto<TRoleClaimDto, TKey>
         where TUserClaimDto : UserClaimDto<TKey>
         where TRoleClaimDto : RoleClaimDto<TKey>
+        where TUserEmailDto : UserEmailDto<TKey>
     {
         Task<bool> ExistsUserAsync(string userId);
 

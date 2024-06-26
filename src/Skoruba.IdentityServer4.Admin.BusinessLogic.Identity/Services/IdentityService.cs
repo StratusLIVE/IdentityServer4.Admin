@@ -20,10 +20,10 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
     public class IdentityService<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole,
         TUserLogin, TRoleClaim, TUserToken,
         TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto> : IIdentityService<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole,
+        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto, TUserEmailDto> : IIdentityService<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole,
         TUserLogin, TRoleClaim, TUserToken,
         TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto>
+        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto, TUserEmailDto>
         where TUserDto : UserDto<TKey>
         where TRoleDto : RoleDto<TKey>
         where TUser : IdentityUser<TKey>
@@ -44,6 +44,7 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
         where TRoleClaimsDto : RoleClaimsDto<TRoleClaimDto, TKey>
         where TUserClaimDto : UserClaimDto<TKey>
         where TRoleClaimDto : RoleClaimDto<TKey>
+        where TUserEmailDto : UserEmailDto<TKey>
     {
         protected readonly IIdentityRepository<TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken> IdentityRepository;
         protected readonly IIdentityServiceResources IdentityServiceResources;

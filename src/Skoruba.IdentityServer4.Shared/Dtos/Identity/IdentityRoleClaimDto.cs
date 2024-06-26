@@ -6,4 +6,9 @@ namespace Skoruba.IdentityServer4.Shared.Dtos.Identity
     {
         
     }
+    public class IdentityUserEmailDto : UserEmailDto<string>
+    {
+        
+    }
+    
 }

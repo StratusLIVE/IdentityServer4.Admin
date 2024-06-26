@@ -3,7 +3,9 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.Configuration;
@@ -19,6 +21,7 @@ namespace Skoruba.IdentityServer4.Admin
     {
         private const string SeedArgs = "/seed";
         private const string MigrateOnlyArgs = "/migrateonly";
+        private const string IgniteMigrateArgs = "migratedb";
 
         public static async Task Main(string[] args)
         {
@@ -35,6 +38,15 @@ namespace Skoruba.IdentityServer4.Admin
                 var host = CreateHostBuilder(args).Build();
 
                 var migrationComplete = await ApplyDbMigrationsWithDataSeedAsync(args, configuration, host);
+                if (args.Any(x => x == IgniteMigrateArgs))
+                {
+                    migrationComplete = await ApplyIgniteIdentityMigrations(configuration, host);
+                    await host.StopAsync();
+                    if (!migrationComplete) {
+                        Environment.ExitCode = -1;
+                    }
+                    return;
+                }
                 if (args.Any(x => x == MigrateOnlyArgs))
                 {
                     await host.StopAsync();
@@ -70,6 +82,17 @@ namespace Skoruba.IdentityServer4.Admin
                     IdentityServerPersistedGrantDbContext, AdminLogDbContext, AdminAuditLogDbContext,
                     IdentityServerDataProtectionDbContext, UserIdentity, UserIdentityRole>(host,
                     applyDbMigrationWithDataSeedFromProgramArguments, seedConfiguration, databaseMigrationsConfiguration);
+        }
+
+        private static async Task<bool> ApplyIgniteIdentityMigrations(IConfiguration configuration, IHost host)
+        {
+            using var scope = host.Services.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IdentityServerDataProtectionDbContext>().Database
+                .MigrateAsync();
+            await scope.ServiceProvider.GetRequiredService<AdminAuditLogDbContext>().Database.MigrateAsync();
+            await scope.ServiceProvider.GetRequiredService<AdminLogDbContext>().Database.MigrateAsync();
+
+            return true;
         }
 
         private static IConfiguration GetConfiguration(string[] args)

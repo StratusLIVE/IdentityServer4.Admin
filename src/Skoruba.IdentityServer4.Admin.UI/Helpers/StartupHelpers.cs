@@ -229,7 +229,7 @@ namespace Skoruba.IdentityServer4.Admin.UI.Helpers
         /// <param name="services"></param>
         public static void AddMvcWithLocalization<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
             TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-            TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto>
+            TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto, TUserEmailDto>
             (this IServiceCollection services, CultureConfiguration cultureConfiguration)
             where TUserDto : UserDto<TKey>, new()
             where TRoleDto : RoleDto<TKey>, new()
@@ -251,6 +251,7 @@ namespace Skoruba.IdentityServer4.Admin.UI.Helpers
             where TRoleClaimsDto : RoleClaimsDto<TRoleClaimDto, TKey>
             where TUserClaimDto : UserClaimDto<TKey>
             where TRoleClaimDto : RoleClaimDto<TKey>
+            where TUserEmailDto : UserEmailDto<TKey> 
         {
             services.AddSingleton<ITempDataProvider, CookieTempDataProvider>();
 
@@ -276,7 +277,7 @@ namespace Skoruba.IdentityServer4.Admin.UI.Helpers
                 {
                     m.FeatureProviders.Add(new GenericTypeControllerFeatureProvider<TUserDto, TRoleDto, TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken,
                         TUsersDto, TRolesDto, TUserRolesDto, TUserClaimsDto,
-                        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto>());
+                        TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto, TRoleClaimDto, TUserEmailDto>());
                 });
 
             services.Configure<RequestLocalizationOptions>(
