@@ -19,7 +19,6 @@ using Skoruba.IdentityServer4.Admin.UI.Configuration;
 using Skoruba.IdentityServer4.Admin.UI.Configuration.Constants;
 using Skoruba.IdentityServer4.Admin.UI.ExceptionHandling;
 using Skoruba.IdentityServer4.Admin.UI.Helpers.Localization;
-using Skoruba.IdentityServer4.STS.Identity.Configuration.Interfaces;
 
 namespace Skoruba.IdentityServer4.Admin.UI.Areas.AdminUI.Controllers
 {
