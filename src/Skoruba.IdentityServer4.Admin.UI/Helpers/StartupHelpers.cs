@@ -41,11 +41,14 @@ using Microsoft.AspNetCore.Mvc.Localization;
 using Microsoft.AspNetCore.Hosting;
 using Skoruba.IdentityServer4.Admin.UI.Middlewares;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Configuration;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.Configuration;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.MySql;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.PostgreSQL;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.SqlServer;
 using Skoruba.IdentityServer4.Shared.Configuration.Authentication;
+using StratusLive.PlatformCore.ServiceDiscovery;
+using StratusLive.PlatformCore.ServiceDiscovery.Consul;
 
 namespace Skoruba.IdentityServer4.Admin.UI.Helpers
 {
@@ -174,7 +177,7 @@ namespace Skoruba.IdentityServer4.Admin.UI.Helpers
 
             var operationalStoreOptions = new OperationalStoreOptions();
             services.AddSingleton(operationalStoreOptions);
-
+            
             var storeOptions = new ConfigurationStoreOptions();
             services.AddSingleton(storeOptions);
 
@@ -358,6 +361,10 @@ namespace Skoruba.IdentityServer4.Admin.UI.Helpers
                 .AddEntityFrameworkStores<TContext>()
                 .AddDefaultTokenProviders();
 
+            var serviceProvider = services.BuildServiceProvider();
+            var serviceDiscoveryClient = serviceProvider.GetService<IServiceDiscoveryClient>();
+            var identityServerDiscovery = serviceDiscoveryClient.GetService("sl-public-identity");
+            
             var authenticationBuilder = services.AddAuthentication(options =>
             {
                 options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
@@ -375,7 +382,7 @@ namespace Skoruba.IdentityServer4.Admin.UI.Helpers
                         })
                     .AddOpenIdConnect(AuthenticationConsts.OidcAuthenticationScheme, options =>
                     {
-                        options.Authority = adminConfiguration.IdentityServerBaseUrl;
+                        options.Authority = string.Format($"{identityServerDiscovery.Address}");
                         options.RequireHttpsMetadata = adminConfiguration.RequireHttpsMetadata;
                         options.ClientId = adminConfiguration.ClientId;
                         options.ClientSecret = adminConfiguration.ClientSecret;

@@ -101,6 +101,8 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.6" />
     <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="8.0.6" />
     <PackageReference Include="NWebsec.AspNetCore.Middleware" Version="3.0.0" />
+    <PackageReference Include="StratusLive.PlatformCore" Version="8.1.0" />
+    <PackageReference Include="StratusLive.PlatformCore.ServiceDiscovery.Consul" Version="8.1.0" />
   </ItemGroup>
 
   <ItemGroup>

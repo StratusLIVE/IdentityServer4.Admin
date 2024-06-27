@@ -8,9 +8,12 @@ using Skoruba.IdentityServer4.Admin.UI.Helpers;
 using System;
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Skoruba.AuditLogging.EntityFramework.DbContexts;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Interfaces;
 using Skoruba.IdentityServer4.Shared.Configuration.Helpers;
+using StratusLive.PlatformCore.ServiceDiscovery;
+using StratusLive.PlatformCore.ServiceDiscovery.Consul;
 using static Skoruba.IdentityServer4.Admin.UI.Helpers.StartupHelpers;
 
 namespace Microsoft.Extensions.DependencyInjection
@@ -23,7 +26,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="services"></param>
         /// <param name="optionsAction"></param>
         /// <returns></returns>
-        public static IServiceCollection AddIdentityServer4AdminUI<TIdentityDbContext, TIdentityServerDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLogDbContext, TAuditLog, TDataProtectionDbContext>(this IServiceCollection services, Action<IdentityServer4AdminUIOptions> optionsAction) 
+        public static IServiceCollection AddIdentityServer4AdminUI<TIdentityDbContext, TIdentityServerDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLogDbContext, TAuditLog, TDataProtectionDbContext>(this IServiceCollection services, IConfiguration configuration, Action<IdentityServer4AdminUIOptions> optionsAction) 
             where TIdentityDbContext : IdentityDbContext<IdentityUser<string>, IdentityRole, string, IdentityUserClaim<string>, IdentityUserRole<string>, IdentityUserLogin<string>, IdentityRoleClaim<string>, IdentityUserToken<string>>
             where TIdentityServerDbContext : DbContext, IAdminConfigurationDbContext
             where TPersistedGrantDbContext : DbContext, IAdminPersistedGrantDbContext
@@ -36,7 +39,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 IdentityUserToken<string>, string,
                 UserDto<string>, RoleDto<string>, UsersDto<UserDto<string>, string>, RolesDto<RoleDto<string>, string>,
                 UserRolesDto<RoleDto<string>, string>, UserClaimsDto<UserClaimDto<string>, string>, UserProviderDto<string>, UserProvidersDto<UserProviderDto<string>, string>,
-                UserChangePasswordDto<string>, RoleClaimsDto<RoleClaimDto<string>, string>, UserClaimDto<string>, RoleClaimDto<string>, UserEmailDto<string>>(services, optionsAction);
+                UserChangePasswordDto<string>, RoleClaimsDto<RoleClaimDto<string>, string>, UserClaimDto<string>, RoleClaimDto<string>, UserEmailDto<string>>(services, configuration, optionsAction);
 
         /// <summary>
         /// Adds the Skoruba IdentityServer4 Admin UI with a custom user model and database context.
@@ -46,7 +49,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="services"></param>
         /// <param name="optionsAction"></param>
         /// <returns></returns>
-        public static IServiceCollection AddIdentityServer4AdminUI<TIdentityDbContext, TIdentityServerDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLogDbContext, TAuditLog, TDataProtectionDbContext, TUser>(this IServiceCollection services, Action<IdentityServer4AdminUIOptions> optionsAction)
+        public static IServiceCollection AddIdentityServer4AdminUI<TIdentityDbContext, TIdentityServerDbContext, TPersistedGrantDbContext, TLogDbContext, TAuditLogDbContext, TAuditLog, TDataProtectionDbContext, TUser>(this IServiceCollection services, IConfiguration configuration, Action<IdentityServer4AdminUIOptions> optionsAction)
             where TIdentityDbContext : IdentityDbContext<TUser, IdentityRole, string, IdentityUserClaim<string>,
                 IdentityUserRole<string>, IdentityUserLogin<string>, IdentityRoleClaim<string>,
                 IdentityUserToken<string>>
@@ -61,7 +64,7 @@ namespace Microsoft.Extensions.DependencyInjection
                 IdentityUserRole<string>, IdentityUserLogin<string>, IdentityRoleClaim<string>,
                 IdentityUserToken<string>, string, UserDto<string>, RoleDto<string>, UsersDto<UserDto<string>, string>, RolesDto<RoleDto<string>, string>,
                 UserRolesDto<RoleDto<string>, string>, UserClaimsDto<UserClaimDto<string>, string>, UserProviderDto<string>, UserProvidersDto<UserProviderDto<string>, string>,
-                UserChangePasswordDto<string>, RoleClaimsDto<RoleClaimDto<string>, string>, UserClaimDto<string>, RoleClaimDto<string>, UserEmailDto<string>>(services, optionsAction);
+                UserChangePasswordDto<string>, RoleClaimsDto<RoleClaimDto<string>, string>, UserClaimDto<string>, RoleClaimDto<string>, UserEmailDto<string>>(services, configuration, optionsAction);
 
         /// <summary>
         /// Adds the Skoruba IdentityServer4 Admin UI with a fully custom entity model and database contexts.
@@ -73,7 +76,7 @@ namespace Microsoft.Extensions.DependencyInjection
             TUserRole, TUserLogin, TRoleClaim, TUserToken, TKey, TUserDto, TRoleDto, TUsersDto, TRolesDto, TUserRolesDto,
             TUserClaimsDto, TUserProviderDto, TUserProvidersDto, TUserChangePasswordDto, TRoleClaimsDto, TUserClaimDto,
             TRoleClaimDto, TUserEmailDto>
-            (this IServiceCollection services, Action<IdentityServer4AdminUIOptions> optionsAction)
+            (this IServiceCollection services, IConfiguration configuration, Action<IdentityServer4AdminUIOptions> optionsAction)
             where TIdentityDbContext : IdentityDbContext<TUser, TRole, TKey, TUserClaim, TUserRole, TUserLogin, TRoleClaim, TUserToken>
             where TIdentityServerDbContext : DbContext, IAdminConfigurationDbContext
             where TPersistedGrantDbContext : DbContext, IAdminPersistedGrantDbContext
@@ -107,6 +110,8 @@ namespace Microsoft.Extensions.DependencyInjection
             var options = new IdentityServer4AdminUIOptions();
             optionsAction(options);
 
+                        
+            services.AddSingleton<IServiceDiscoveryClient>(new ServiceDiscoveryClient(new Uri(configuration.GetSection("ConsulUrl").Value)));
             // Adds root configuration to the DI.
             services.AddSingleton(options.Admin);
             services.AddSingleton(options.IdentityServerData);
