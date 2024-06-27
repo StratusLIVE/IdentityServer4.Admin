@@ -37,11 +37,13 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.HttpOverrides;
 using System.Collections.Generic;
+using System.Net.Http;
 using Microsoft.AspNetCore.Mvc.Localization;
 using Microsoft.AspNetCore.Hosting;
 using Skoruba.IdentityServer4.Admin.UI.Middlewares;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.Configuration;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.MySql;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Configuration.PostgreSQL;
@@ -411,6 +413,16 @@ namespace Skoruba.IdentityServer4.Admin.UI.Helpers
                             OnMessageReceived = context => OnMessageReceived(context, adminConfiguration),
                             OnRedirectToIdentityProvider = context => OnRedirectToIdentityProvider(context, adminConfiguration)
                         };
+                        
+                        var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                        if (environment == Environments.Development)
+                        {
+                            options.BackchannelHttpHandler = new HttpClientHandler
+                            {
+                                ServerCertificateCustomValidationCallback =
+                                    HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                            };
+                        }
                     });
 
             authenticationBuilderAction?.Invoke(authenticationBuilder);
