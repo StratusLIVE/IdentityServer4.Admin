@@ -1,11 +1,11 @@
 ﻿using System.Threading.Tasks;
-using IdentityServer4.AccessTokenValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SkorubaIdentityServer4Admin.Admin.Api.Configuration.Constants;
 using SkorubaIdentityServer4Admin.Admin.Api.Dtos.ApiResources;
 using SkorubaIdentityServer4Admin.Admin.Api.ExceptionHandling;
 using SkorubaIdentityServer4Admin.Admin.Api.Mappers;
+using SkorubaIdentityServer4Admin.Admin.Api.Resources;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Dtos.Configuration;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Services.Interfaces;
 
@@ -14,15 +14,17 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Controllers
     [Route("api/[controller]")]
     [ApiController]
     [TypeFilter(typeof(ControllerExceptionFilterAttribute))]
-    [Produces("application/json")]
-    [Authorize(AuthenticationSchemes = IdentityServerAuthenticationDefaults.AuthenticationScheme, Policy = AuthorizationConsts.AdministrationPolicy)]
+    [Produces("application/json", "application/problem+json")]
+    [Authorize(Policy = AuthorizationConsts.AdministrationPolicy)]
     public class ApiResourcesController : ControllerBase
     {
         private readonly IApiResourceService _apiResourceService;
+        private readonly IApiErrorResources _errorResources;
 
-        public ApiResourcesController(IApiResourceService apiResourceService)
+        public ApiResourcesController(IApiResourceService apiResourceService, IApiErrorResources errorResources)
         {
             _apiResourceService = apiResourceService;
+            _errorResources = errorResources;
         }
 
         [HttpGet]
@@ -44,12 +46,21 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Controllers
         }
 
         [HttpPost]
+        [ProducesResponseType(201)]
+        [ProducesResponseType(400)]
         public async Task<IActionResult> Post([FromBody]ApiResourceApiDto apiResourceApi)
         {
             var apiResourceDto = apiResourceApi.ToApiResourceApiModel<ApiResourceDto>();
-            await _apiResourceService.AddApiResourceAsync(apiResourceDto);
 
-            return Ok();
+            if (!apiResourceDto.Id.Equals(default))
+            {
+                return BadRequest(_errorResources.CannotSetId());
+            }
+
+            var apiResourceId = await _apiResourceService.AddApiResourceAsync(apiResourceDto);
+            apiResourceApi.Id = apiResourceId;
+
+            return CreatedAtAction(nameof(Get), new { id = apiResourceId }, apiResourceApi);
         }
 
         [HttpPut]
@@ -73,64 +84,7 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Controllers
 
             return Ok();
         }
-
-        [HttpGet("{id}/Scopes")]
-        public async Task<ActionResult<ApiScopesApiDto>> GetScopes(int id, int page = 1, int pageSize = 10)
-        {
-            var apiScopesDto = await _apiResourceService.GetApiScopesAsync(id, page, pageSize);
-            var apiScopesApiDto = apiScopesDto.ToApiResourceApiModel<ApiScopesApiDto>();
-
-            return Ok(apiScopesApiDto);
-        }
-
-        [HttpGet("{id}/Scopes/{scopeId}")]
-        public async Task<ActionResult<ApiScopeApiDto>> GetScope(int id, int scopeId)
-        {
-            var apiScopesDto = await _apiResourceService.GetApiScopeAsync(id, scopeId);
-            var apiScopeApiDto = apiScopesDto.ToApiResourceApiModel<ApiScopeApiDto>();
-
-            return Ok(apiScopeApiDto);
-        }
-
-        [HttpPost("{id}/Scopes")]
-        public async Task<IActionResult> PostScope(int id, [FromBody]ApiScopeApiDto apiScopeApi)
-        {
-            var apiScope = apiScopeApi.ToApiResourceApiModel<ApiScopesDto>();
-            apiScope.ApiResourceId = id;
-
-            await _apiResourceService.GetApiResourceAsync(apiScope.ApiResourceId);
-            await _apiResourceService.AddApiScopeAsync(apiScope);
-            
-            return Ok();
-        }
-
-        [HttpPut("{id}/Scopes")]
-        public async Task<IActionResult> PutScope(int id, [FromBody]ApiScopeApiDto apiScopeApi)
-        {
-            var apiScope = apiScopeApi.ToApiResourceApiModel<ApiScopesDto>();
-            apiScope.ApiResourceId = id;
-
-            await _apiResourceService.GetApiResourceAsync(apiScope.ApiResourceId);
-            await _apiResourceService.GetApiScopeAsync(apiScope.ApiResourceId, apiScope.ApiScopeId);
-
-            await _apiResourceService.UpdateApiScopeAsync(apiScope);
-
-            return Ok();
-        }
-
-        [HttpDelete("{id}/Scopes/{apiScopeId}")]
-        public async Task<IActionResult> DeleteScope(int id, int apiScopeId)
-        {
-            var apiScope = new ApiScopesDto { ApiResourceId = id, ApiScopeId = apiScopeId };
-
-            await _apiResourceService.GetApiResourceAsync(apiScope.ApiResourceId);
-            await _apiResourceService.GetApiScopeAsync(apiScope.ApiResourceId, apiScope.ApiScopeId);
-
-            await _apiResourceService.DeleteApiScopeAsync(apiScope);
-
-            return Ok();
-        }
-
+        
         [HttpGet("{id}/Secrets")]
         public async Task<ActionResult<ApiSecretsApiDto>> GetSecrets(int id, int page = 1, int pageSize = 10)
         {
@@ -150,14 +104,22 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Controllers
         }
 
         [HttpPost("{id}/Secrets")]
+        [ProducesResponseType(201)]
+        [ProducesResponseType(400)]
         public async Task<IActionResult> PostSecret(int id, [FromBody]ApiSecretApiDto clientSecretApi)
         {
             var secretsDto = clientSecretApi.ToApiResourceApiModel<ApiSecretsDto>();
             secretsDto.ApiResourceId = id;
 
-            await _apiResourceService.AddApiSecretAsync(secretsDto);
+            if (!secretsDto.ApiSecretId.Equals(default))
+            {
+                return BadRequest(_errorResources.CannotSetId());
+            }
 
-            return Ok();
+            var secretId = await _apiResourceService.AddApiSecretAsync(secretsDto);
+            clientSecretApi.Id = secretId;
+
+            return CreatedAtAction(nameof(GetSecret), new { secretId }, clientSecretApi);
         }
 
         [HttpDelete("Secrets/{secretId}")]
@@ -190,14 +152,22 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Controllers
         }
 
         [HttpPost("{id}/Properties")]
+        [ProducesResponseType(201)]
+        [ProducesResponseType(400)]
         public async Task<IActionResult> PostProperty(int id, [FromBody]ApiResourcePropertyApiDto apiPropertyApi)
         {
             var apiResourcePropertiesDto = apiPropertyApi.ToApiResourceApiModel<ApiResourcePropertiesDto>();
             apiResourcePropertiesDto.ApiResourceId = id;
 
-            await _apiResourceService.AddApiResourcePropertyAsync(apiResourcePropertiesDto);
+            if (!apiResourcePropertiesDto.ApiResourcePropertyId.Equals(default))
+            {
+                return BadRequest(_errorResources.CannotSetId());
+            }
 
-            return Ok();
+            var propertyId = await _apiResourceService.AddApiResourcePropertyAsync(apiResourcePropertiesDto);
+            apiPropertyApi.Id = propertyId;
+
+            return CreatedAtAction(nameof(GetProperty), new { propertyId }, apiPropertyApi);
         }
 
         [HttpDelete("Properties/{propertyId}")]
@@ -212,3 +182,10 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Controllers
         }
     }
 }
+
+
+
+
+
+
+

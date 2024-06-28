@@ -5,6 +5,7 @@ using FluentAssertions;
 using IdentityServer4.EntityFramework.Options;
 using Microsoft.EntityFrameworkCore;
 using Moq;
+using Skoruba.AuditLogging.Services;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Mappers;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Resources;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Services;
@@ -42,27 +43,37 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 			return identityResourceRepository;
 		}
 
-		private IIdentityResourceService GetIdentityResourceService(IIdentityResourceRepository repository, IIdentityResourceServiceResources identityResourceServiceResources)
+		private IIdentityResourceService GetIdentityResourceService(IIdentityResourceRepository repository, IIdentityResourceServiceResources identityResourceServiceResources, IAuditEventLogger auditEventLogger)
 		{
-			IIdentityResourceService identityResourceService = new IdentityResourceService(repository, identityResourceServiceResources);
+			IIdentityResourceService identityResourceService = new IdentityResourceService(repository, identityResourceServiceResources, auditEventLogger);
 
 			return identityResourceService;
 		}
 
-		[Fact]
+        private IIdentityResourceService GetIdentityResourceService(IdentityServerConfigurationDbContext context)
+        {
+            var identityResourceRepository = GetIdentityResourceRepository(context);
+
+            var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
+            var localizerIdentityResource = localizerIdentityResourceMock.Object;
+
+            var auditLoggerMock = new Mock<IAuditEventLogger>();
+            var auditLogger = auditLoggerMock.Object;
+
+            var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource, auditLogger);
+
+            return identityResourceService;
+        }
+
+        [Fact]
 		public async Task AddIdentityResourceAsync()
 		{
 			using (var context = new IdentityServerConfigurationDbContext(_dbContextOptions, _storeOptions))
-			{
-				var identityResourceRepository = GetIdentityResourceRepository(context);
+            {
+                var identityResourceService = GetIdentityResourceService(context);
 
-				var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
-				var localizerIdentityResource = localizerIdentityResourceMock.Object;
-
-				var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource);
-
-				//Generate random new identity resource
-				var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
+                //Generate random new identity resource
+                var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
 
 				await identityResourceService.AddIdentityResourceAsync(identityResourceDto);
 
@@ -72,7 +83,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var newIdentityResourceDto = await identityResourceService.GetIdentityResourceAsync(identityResource.Id);
 
 				//Assert new identity resource
-				identityResourceDto.ShouldBeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
+				identityResourceDto.Should().BeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
 			}
 		}
 
@@ -81,15 +92,10 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 		{
 			using (var context = new IdentityServerConfigurationDbContext(_dbContextOptions, _storeOptions))
 			{
-				var identityResourceRepository = GetIdentityResourceRepository(context);
-
-				var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
-				var localizerIdentityResource = localizerIdentityResourceMock.Object;
-
-				var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource);
-
-				//Generate random new identity resource
-				var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
+                var identityResourceService = GetIdentityResourceService(context);
+                
+                //Generate random new identity resource
+                var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
 
 				await identityResourceService.AddIdentityResourceAsync(identityResourceDto);
 
@@ -99,7 +105,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var newIdentityResourceDto = await identityResourceService.GetIdentityResourceAsync(identityResource.Id);
 
 				//Assert new identity resource
-				identityResourceDto.ShouldBeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
+				identityResourceDto.Should().BeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
 			}
 		}
 
@@ -108,15 +114,10 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 		{
 			using (var context = new IdentityServerConfigurationDbContext(_dbContextOptions, _storeOptions))
 			{
-				var identityResourceRepository = GetIdentityResourceRepository(context);
-
-				var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
-				var localizerIdentityResource = localizerIdentityResourceMock.Object;
-
-				var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource);
-
-				//Generate random new identity resource
-				var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
+                var identityResourceService = GetIdentityResourceService(context);
+                
+                //Generate random new identity resource
+                var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
 
 				await identityResourceService.AddIdentityResourceAsync(identityResourceDto);
 
@@ -126,7 +127,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var newIdentityResourceDto = await identityResourceService.GetIdentityResourceAsync(identityResource.Id);
 
 				//Assert new identity resource
-				identityResourceDto.ShouldBeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
+				identityResourceDto.Should().BeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
 
 				//Remove identity resource
 				await identityResourceService.DeleteIdentityResourceAsync(newIdentityResourceDto);
@@ -145,15 +146,10 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 		{
 			using (var context = new IdentityServerConfigurationDbContext(_dbContextOptions, _storeOptions))
 			{
-				var identityResourceRepository = GetIdentityResourceRepository(context);
+                var identityResourceService = GetIdentityResourceService(context);
 
-				var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
-				var localizerIdentityResource = localizerIdentityResourceMock.Object;
-
-				var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource);
-
-				//Generate random new identity resource
-				var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
+                //Generate random new identity resource
+                var identityResourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
 
 				await identityResourceService.AddIdentityResourceAsync(identityResourceDto);
 
@@ -163,7 +159,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var newIdentityResourceDto = await identityResourceService.GetIdentityResourceAsync(identityResource.Id);
 
 				//Assert new identity resource
-				identityResourceDto.ShouldBeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
+				identityResourceDto.Should().BeEquivalentTo(newIdentityResourceDto, options => options.Excluding(o => o.Id));
 
 				//Detached the added item
 				context.Entry(identityResource).State = EntityState.Detached;
@@ -177,7 +173,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var updatedIdentityResourceDto = await identityResourceService.GetIdentityResourceAsync(identityResource.Id);
 
 				//Assert updated identity resuorce
-				updatedIdentityResource.ShouldBeEquivalentTo(updatedIdentityResourceDto, options => options.Excluding(o => o.Id));
+				updatedIdentityResource.Should().BeEquivalentTo(updatedIdentityResourceDto, options => options.Excluding(o => o.Id));
 			}
 		}
 
@@ -186,15 +182,10 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 		{
 			using (var context = new IdentityServerConfigurationDbContext(_dbContextOptions, _storeOptions))
 			{
-				var identityResourceRepository = GetIdentityResourceRepository(context);
+                var identityResourceService = GetIdentityResourceService(context);
 
-				var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
-				var localizerIdentityResource = localizerIdentityResourceMock.Object;
-
-				var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource);
-
-				//Generate random new identity resource
-				var identityResource = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
+                //Generate random new identity resource
+                var identityResource = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
 
 				await identityResourceService.AddIdentityResourceAsync(identityResource);
 
@@ -204,7 +195,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var identityResourceDto = await identityResourceService.GetIdentityResourceAsync(resource.Id);
 
 				//Assert new identity resource
-				identityResource.ShouldBeEquivalentTo(identityResourceDto, options => options.Excluding(o => o.Id));
+				identityResource.Should().BeEquivalentTo(identityResourceDto, options => options.Excluding(o => o.Id));
 
 				//Generate random new identity resource property
 				var resourceProperty = IdentityResourceDtoMock.GenerateRandomIdentityResourceProperty(0, resource.Id);
@@ -223,7 +214,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var resourcePropertiesDto = await identityResourceService.GetIdentityResourcePropertyAsync(property.Id);
 
 				//Assert
-				resourcePropertiesDto.ShouldBeEquivalentTo(propertyDto, options =>
+				resourcePropertiesDto.Should().BeEquivalentTo(propertyDto, options =>
 					options.Excluding(o => o.IdentityResourcePropertyId)
 						   .Excluding(o => o.IdentityResourceName));
 			}
@@ -234,15 +225,10 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 		{
 			using (var context = new IdentityServerConfigurationDbContext(_dbContextOptions, _storeOptions))
 			{
-				var identityResourceRepository = GetIdentityResourceRepository(context);
+                var identityResourceService = GetIdentityResourceService(context);
 
-				var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
-				var localizerIdentityResource = localizerIdentityResourceMock.Object;
-
-				var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource);
-
-				//Generate random new identity resource
-				var identityResource = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
+                //Generate random new identity resource
+                var identityResource = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
 
 				await identityResourceService.AddIdentityResourceAsync(identityResource);
 
@@ -252,7 +238,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var identityResourceDto = await identityResourceService.GetIdentityResourceAsync(resource.Id);
 
 				//Assert new identity resource
-				identityResource.ShouldBeEquivalentTo(identityResourceDto, options => options.Excluding(o => o.Id));
+				identityResource.Should().BeEquivalentTo(identityResourceDto, options => options.Excluding(o => o.Id));
 
 				//Generate random new identity resource property
 				var identityResourceProperty = IdentityResourceDtoMock.GenerateRandomIdentityResourceProperty(0, resource.Id);
@@ -271,7 +257,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var resourcePropertiesDto = await identityResourceService.GetIdentityResourcePropertyAsync(property.Id);
 
 				//Assert
-				resourcePropertiesDto.ShouldBeEquivalentTo(propertyDto, options =>
+				resourcePropertiesDto.Should().BeEquivalentTo(propertyDto, options =>
 					options.Excluding(o => o.IdentityResourcePropertyId)
 					.Excluding(o => o.IdentityResourceName));
 			}
@@ -282,15 +268,10 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 		{
 			using (var context = new IdentityServerConfigurationDbContext(_dbContextOptions, _storeOptions))
 			{
-				var identityResourceRepository = GetIdentityResourceRepository(context);
+                var identityResourceService = GetIdentityResourceService(context);
 
-				var localizerIdentityResourceMock = new Mock<IIdentityResourceServiceResources>();
-				var localizerIdentityResource = localizerIdentityResourceMock.Object;
-
-				var identityResourceService = GetIdentityResourceService(identityResourceRepository, localizerIdentityResource);
-
-				//Generate random new identity resource
-				var resourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
+                //Generate random new identity resource
+                var resourceDto = IdentityResourceDtoMock.GenerateRandomIdentityResource(0);
 
 				await identityResourceService.AddIdentityResourceAsync(resourceDto);
 
@@ -300,7 +281,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var identityResourceDto = await identityResourceService.GetIdentityResourceAsync(resource.Id);
 
 				//Assert new identity resource
-				resourceDto.ShouldBeEquivalentTo(identityResourceDto, options => options.Excluding(o => o.Id));
+				resourceDto.Should().BeEquivalentTo(identityResourceDto, options => options.Excluding(o => o.Id));
 
 				//Generate random new identity resource Property
 				var identityResourcePropertiesDto = IdentityResourceDtoMock.GenerateRandomIdentityResourceProperty(0, resource.Id);
@@ -319,7 +300,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 				var resourcePropertiesDto = await identityResourceService.GetIdentityResourcePropertyAsync(property.Id);
 
 				//Assert
-				resourcePropertiesDto.ShouldBeEquivalentTo(propertiesDto, options =>
+				resourcePropertiesDto.Should().BeEquivalentTo(propertiesDto, options =>
 					options.Excluding(o => o.IdentityResourcePropertyId)
 					.Excluding(o => o.IdentityResourceName));
 

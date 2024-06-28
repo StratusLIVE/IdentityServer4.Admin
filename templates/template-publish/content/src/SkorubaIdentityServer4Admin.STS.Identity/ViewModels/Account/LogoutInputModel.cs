@@ -11,3 +11,11 @@ namespace SkorubaIdentityServer4Admin.STS.Identity.ViewModels.Account
         public string LogoutId { get; set; }
     }
 }
+
+
+
+
+
+
+
+

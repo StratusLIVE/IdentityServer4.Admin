@@ -1,30 +1,25 @@
 ﻿using System.Net;
-using System.Net.Http;
 using System.Threading.Tasks;
 using FluentAssertions;
-using Skoruba.IdentityServer4.Admin.Configuration.Constants;
-using Skoruba.IdentityServer4.Admin.IntegrationTests.Common;
+using Skoruba.IdentityServer4.Admin.IntegrationTests.Tests.Base;
+using Skoruba.IdentityServer4.Admin.UI.Configuration.Constants;
 using Xunit;
 
 namespace Skoruba.IdentityServer4.Admin.IntegrationTests.Tests
 {
-    public class HomeControllerTests : IClassFixture<TestFixture>
+	public class HomeControllerTests : BaseClassFixture
     {
-        private readonly HttpClient _client;
-
-        public HomeControllerTests(TestFixture fixture)
+        public HomeControllerTests(TestFixture fixture) : base(fixture)
         {
-            _client = fixture.Client;
         }
 
         [Fact]
         public async Task ReturnSuccessWithAdminRole()
         {
-            //Get claims for admin
-            _client.SetAdminClaimsViaHeaders();
+            SetupAdminClaimsViaHeaders();
 
             // Act
-            var response = await _client.GetAsync("/home/index");
+            var response = await Client.GetAsync("/home/index");
 
             // Assert
             response.EnsureSuccessStatusCode();
@@ -35,10 +30,10 @@ namespace Skoruba.IdentityServer4.Admin.IntegrationTests.Tests
         public async Task ReturnRedirectWithoutAdminRole()
         {
             //Remove
-            _client.DefaultRequestHeaders.Clear();
+            Client.DefaultRequestHeaders.Clear();
 
             // Act
-            var response = await _client.GetAsync("/home/index");
+            var response = await Client.GetAsync("/home/index");
 
             // Assert
             response.StatusCode.Should().Be(HttpStatusCode.Redirect);

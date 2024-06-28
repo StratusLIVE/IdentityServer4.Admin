@@ -16,3 +16,10 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Dtos.Clients
         public int PageSize { get; set; }
     }
 }
+
+
+
+
+
+
+

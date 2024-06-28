@@ -38,3 +38,10 @@ namespace SkorubaIdentityServer4Admin.Admin.Api.Dtos.Clients
         public bool CloneClientProperties { get; set; }
     }
 }
+
+
+
+
+
+
+
