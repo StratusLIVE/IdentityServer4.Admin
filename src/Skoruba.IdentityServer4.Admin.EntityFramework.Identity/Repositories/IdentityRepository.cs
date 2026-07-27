@@ -210,6 +210,11 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             Mapper.Map(user, userIdentity);
             var identityResult = await UserManager.UpdateAsync(userIdentity);
 
+            if (identityResult.Succeeded)
+            {
+                await SyncPrimaryEmailRowAsync(user);
+            }
+
             return (identityResult, user.Id);
         }
 
@@ -496,6 +501,34 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             user.NormalizedEmail = UserManager.NormalizeEmail(email);
             user.EmailConfirmed = true;
             return await UserManager.UpdateAsync(user);
+        }
+
+        // Editing Users.Email on the admin user page must not strand the old value in the
+        // primary UserEmailAddresses row (drift causes sign-in loops).
+        protected virtual async Task SyncPrimaryEmailRowAsync(TUser user)
+        {
+            var userId = user.Id.ToString();
+            var primary = await UserEmailAddresses.FirstOrDefaultAsync(e => e.UserId == userId && e.IsPrimary);
+            if (primary == null)
+            {
+                await UserEmailAddresses.AddAsync(new UserEmailAddress
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    UserId = userId,
+                    Email = user.Email,
+                    NormalizedEmail = UserManager.NormalizeEmail(user.Email),
+                    EmailConfirmed = true,
+                    IsPrimary = true
+                });
+                await AutoSaveChangesAsync();
+            }
+            else if (!string.Equals(primary.Email, user.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                primary.Email = user.Email;
+                primary.NormalizedEmail = UserManager.NormalizeEmail(user.Email);
+                primary.EmailConfirmed = true;
+                await AutoSaveChangesAsync();
+            }
         }
     }
 }
