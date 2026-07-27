@@ -83,6 +83,7 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                         .Where(e => e.Email.Contains(search))
                         .Select(e => e.UserId)
                         .Distinct()
+                        .Take(1000)   // bounds the IN-clause when a junk term ("@") matches every row
                         .ToListAsync())
                     .Select(ConvertKeyFromString)
                     .ToList();
