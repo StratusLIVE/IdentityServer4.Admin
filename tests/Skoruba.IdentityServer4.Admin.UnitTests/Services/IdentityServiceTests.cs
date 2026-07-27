@@ -1011,7 +1011,6 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 
                 await identityService.UpdateUserAsync(userDtoForUpdate);
 
-                //Covers Task 6 (repository-side sync of the primary row on user update) - expected to remain red until Task 6 implements it.
                 var primaryRow = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.IsPrimary).SingleOrDefaultAsync();
 
                 primaryRow.Should().NotBeNull();

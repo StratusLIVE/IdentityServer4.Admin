@@ -353,7 +353,12 @@ namespace Skoruba.IdentityServer4.Admin.UI.Areas.AdminUI.Controllers
         [ValidateAntiForgeryToken]
         public async Task<IActionResult> UserEmailAddress(UserEmailAddressDto emailAddress)
         {
-            if (!ModelState.IsValid) return View(emailAddress);
+            if (!ModelState.IsValid)
+            {
+                var invalidUser = await _identityService.GetUserAsync(emailAddress.UserId);
+                emailAddress.UserName = invalidUser.UserName;
+                return View(emailAddress);
+            }
 
             var result = string.IsNullOrEmpty(emailAddress.EmailAddressId)
                 ? await _identityService.CreateUserEmailAddressAsync(emailAddress)
@@ -362,6 +367,8 @@ namespace Skoruba.IdentityServer4.Admin.UI.Areas.AdminUI.Controllers
             if (!result.Succeeded)
             {
                 foreach (var error in result.Errors) ModelState.AddModelError(string.Empty, error.Description);
+                var user = await _identityService.GetUserAsync(emailAddress.UserId);
+                emailAddress.UserName = user.UserName;
                 return View(emailAddress);
             }
 
@@ -387,6 +394,8 @@ namespace Skoruba.IdentityServer4.Admin.UI.Areas.AdminUI.Controllers
             if (!result.Succeeded)
             {
                 foreach (var error in result.Errors) ModelState.AddModelError(string.Empty, error.Description);
+                var user = await _identityService.GetUserAsync(emailAddress.UserId);
+                emailAddress.UserName = user.UserName;
                 return View(emailAddress);
             }
 
