@@ -753,6 +753,42 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
         }
 
         [Fact]
+        public async Task AddUserEmailAddress_UnconfirmedPrimaryOnOtherAccount_FailsAndPreservesRow()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                // Victim scenario: registered but never confirmed — row is primary AND unconfirmed.
+                var victimRow = await AddEmailRowAsync(context, otherUser.Id, "victim@example.com", true, false);
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = "victim@example.com",
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+
+                var preserved = await context.Set<UserEmailAddress>().Where(x => x.Id == victimRow.Id).SingleOrDefaultAsync();
+                preserved.Should().NotBeNull();
+            }
+        }
+
+        [Fact]
         public async Task AddUserEmailAddress_ConfirmedUsersEmailOnOtherAccount_Fails()
         {
             using (var context = new AdminIdentityDbContext(_dbContextOptions))

@@ -601,7 +601,9 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             return result;
         }
 
-        // First-to-confirm semantics: a CONFIRMED row on another account blocks; unconfirmed
+        // First-to-confirm semantics: a CONFIRMED row on another account blocks, and so does a
+        // PRIMARY row even when unconfirmed — deleting another account's primary would strand its
+        // Users.Email (the exact drift this feature exists to fix). Only non-primary unconfirmed
         // cross-account rows are stale claims and are cleared. Also blocks on a confirmed
         // Users.Email match with no corresponding UserEmailAddresses row (legacy accounts).
         private async Task<IdentityResult> ResolveCrossAccountConflictAsync(string userId, string email)
@@ -611,10 +613,10 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });
 
             var allRows = await IdentityRepository.GetUserEmailAddressesByEmailAsync(email);
-            if (allRows.Any(r => r.EmailConfirmed && r.UserId != userId))
+            if (allRows.Any(r => r.UserId != userId && (r.EmailConfirmed || r.IsPrimary)))
                 return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });
 
-            foreach (var stale in allRows.Where(r => !r.EmailConfirmed && r.UserId != userId))
+            foreach (var stale in allRows.Where(r => !r.EmailConfirmed && !r.IsPrimary && r.UserId != userId))
             {
                 await IdentityRepository.DeleteUserEmailAddressAsync(stale.Id);
             }
