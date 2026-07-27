@@ -534,10 +534,11 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             if (currentRows.Count >= 3)
                 return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressLimitReached().Description });
 
+            IdentityResult conflictResult = null;
             var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
             {
                 var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
-                if (conflict != null) return conflict;
+                if (conflict != null) return conflictResult = conflict;
 
                 var entity = new UserEmailAddress
                 {
@@ -549,7 +550,8 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 return await IdentityRepository.AddUserEmailAddressAsync(entity);
             });
 
-            await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
+            if (conflictResult == null)
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
             return result;
         }
 
@@ -560,17 +562,19 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, dto.EmailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
 
             var email = dto.Email.Trim();
+            IdentityResult conflictResult = null;
             var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
             {
                 var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
-                if (conflict != null) return conflict;
+                if (conflict != null) return conflictResult = conflict;
 
                 row.Email = email;
                 row.EmailConfirmed = true;
                 return await IdentityRepository.UpdateUserEmailAddressAsync(row);
             });
 
-            await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
+            if (conflictResult == null)
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
             return result;
         }
 
