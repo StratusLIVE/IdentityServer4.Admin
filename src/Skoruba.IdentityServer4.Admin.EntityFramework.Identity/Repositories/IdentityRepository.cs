@@ -552,6 +552,8 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         // primary UserEmailAddresses row (drift causes sign-in loops).
         protected virtual async Task SyncPrimaryEmailRowAsync(TUser user)
         {
+            if (string.IsNullOrEmpty(user.Email)) return;
+
             var userId = user.Id.ToString();
             var primary = await UserEmailAddresses.FirstOrDefaultAsync(e => e.UserId == userId && e.IsPrimary);
             if (primary == null)

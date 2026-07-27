@@ -403,6 +403,29 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
         }
 
         [Fact]
+        public async Task UpdateUser_WithoutEmail_DoesNotCreatePrimaryEmailRow()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                context.Entry(user).State = EntityState.Detached;
+
+                var userDtoForUpdate = IdentityDtoMock<string>.GenerateRandomUser(user.Id);
+                userDtoForUpdate.Email = null;
+
+                await identityService.UpdateUserAsync(userDtoForUpdate);
+
+                var primaryRow = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.IsPrimary).SingleOrDefaultAsync();
+                primaryRow.Should().BeNull();
+            }
+        }
+
+        [Fact]
         public async Task DeleteUserAsync()
         {
             using (var context = new AdminIdentityDbContext(_dbContextOptions))
