@@ -14,6 +14,7 @@ using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Mappers;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfaces;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.Interfaces;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Shared.DbContexts;
@@ -605,6 +606,282 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 
                 //Assert removed role claim
                 roleClaimToDelete.Should().BeNull();
+            }
+        }
+
+        private async Task<UserEmailAddress> AddEmailRowAsync(AdminIdentityDbContext context, string userId, string email, bool isPrimary, bool confirmed)
+        {
+            var row = new UserEmailAddress
+            {
+                Id = Guid.NewGuid().ToString(), UserId = userId, Email = email,
+                NormalizedEmail = email.ToUpperInvariant(), IsPrimary = isPrimary, EmailConfirmed = confirmed
+            };
+            await context.Set<UserEmailAddress>().AddAsync(row);
+            await context.SaveChangesAsync();
+            return row;
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_FourthAddress_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                await AddEmailRowAsync(context, user.Id, "first@example.com", true, true);
+                await AddEmailRowAsync(context, user.Id, "second@example.com", false, true);
+                await AddEmailRowAsync(context, user.Id, "third@example.com", false, true);
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = "fourth@example.com",
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("at most 3"));
+            }
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_SavedAsConfirmed()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = "unconfirmed@example.com",
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeTrue();
+
+                var row = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.Email == dto.Email).SingleOrDefaultAsync();
+                row.Should().NotBeNull();
+                row.EmailConfirmed.Should().BeTrue();
+            }
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_ConfirmedOnOtherAccount_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                var sharedEmail = "shared@example.com";
+                await AddEmailRowAsync(context, otherUser.Id, sharedEmail, true, true);
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = sharedEmail,
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+            }
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_UnconfirmedOnOtherAccount_IsClearedAndSucceeds()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                var sharedEmail = "stale@example.com";
+                var staleRow = await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, false);
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = sharedEmail,
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeTrue();
+
+                var otherRow = await context.Set<UserEmailAddress>().Where(x => x.Id == staleRow.Id).SingleOrDefaultAsync();
+                otherRow.Should().BeNull();
+
+                var ownRow = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.Email == sharedEmail).SingleOrDefaultAsync();
+                ownRow.Should().NotBeNull();
+                ownRow.EmailConfirmed.Should().BeTrue();
+            }
+        }
+
+        [Fact]
+        public async Task DeleteUserEmailAddress_Primary_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var primaryRow = await AddEmailRowAsync(context, user.Id, "primary@example.com", true, true);
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    EmailAddressId = primaryRow.Id
+                };
+
+                var result = await identityService.DeleteUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("primary email address cannot be deleted"));
+            }
+        }
+
+        [Fact]
+        public async Task SetPrimaryUserEmailAddress_SyncsUsersEmail()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var rowA = await AddEmailRowAsync(context, user.Id, "rowa@example.com", true, true);
+                var rowB = await AddEmailRowAsync(context, user.Id, "rowb@example.com", false, true);
+
+                await identityService.SetPrimaryUserEmailAddressAsync(user.Id, rowB.Id);
+
+                var reloadedA = await context.Set<UserEmailAddress>().Where(x => x.Id == rowA.Id).SingleOrDefaultAsync();
+                var reloadedB = await context.Set<UserEmailAddress>().Where(x => x.Id == rowB.Id).SingleOrDefaultAsync();
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+
+                reloadedB.IsPrimary.Should().BeTrue();
+                reloadedA.IsPrimary.Should().BeFalse();
+                reloadedUser.Email.Should().Be(rowB.Email);
+                reloadedUser.NormalizedEmail.Should().Be(rowB.Email.ToUpperInvariant());
+            }
+        }
+
+        [Fact]
+        public async Task UpdateUserEmailAddress_PrimaryRow_SyncsUsersEmail()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var primaryRow = await AddEmailRowAsync(context, user.Id, "old@example.com", true, true);
+
+                var newEmail = "new@example.com";
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    EmailAddressId = primaryRow.Id,
+                    Email = newEmail,
+                    EmailConfirmed = true,
+                    IsPrimary = true
+                };
+
+                var result = await identityService.UpdateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeTrue();
+
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(newEmail);
+            }
+        }
+
+        [Fact]
+        public async Task UpdateUser_SyncsPrimaryEmailRow()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                //Detached the added item
+                context.Entry(user).State = EntityState.Detached;
+
+                var newEmail = $"{Guid.NewGuid()}@example.com";
+                var userDtoForUpdate = IdentityDtoMock<string>.GenerateRandomUser(user.Id);
+                userDtoForUpdate.Email = newEmail;
+
+                await identityService.UpdateUserAsync(userDtoForUpdate);
+
+                //Covers Task 6 (repository-side sync of the primary row on user update) - expected to remain red until Task 6 implements it.
+                var primaryRow = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.IsPrimary).SingleOrDefaultAsync();
+
+                primaryRow.Should().NotBeNull();
+                primaryRow.Email.Should().Be(newEmail);
+                primaryRow.EmailConfirmed.Should().BeTrue();
+            }
+        }
+
+        [Fact]
+        public async Task GetUsers_MatchesSecondaryEmail()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                await AddEmailRowAsync(context, user.Id, "old.typo@example.com", false, true);
+
+                var usersDto = await identityService.GetUsersAsync("old.typo");
+
+                usersDto.Users.Should().Contain(u => u.Id == user.Id);
             }
         }
     }

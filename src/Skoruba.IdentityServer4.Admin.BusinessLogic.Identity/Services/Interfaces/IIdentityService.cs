@@ -101,5 +101,17 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfac
         Task<IdentityResult> DeleteRoleClaimAsync(TRoleClaimsDto role);
 
         Task<IdentityResult> DeleteRoleAsync(TRoleDto role);
+
+        Task<UserEmailAddressesDto> GetUserEmailAddressesAsync(string userId);
+
+        Task<UserEmailAddressDto> GetUserEmailAddressAsync(string userId, string emailAddressId);
+
+        Task<IdentityResult> CreateUserEmailAddressAsync(UserEmailAddressDto dto);
+
+        Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddressDto dto);
+
+        Task<IdentityResult> DeleteUserEmailAddressAsync(UserEmailAddressDto dto);
+
+        Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId);
     }
 }

@@ -13,6 +13,7 @@ using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfaces;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Shared.Dtos.Common;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Shared.ExceptionHandling;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Common;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.Interfaces;
 
 namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
@@ -495,6 +496,116 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             await AuditEventLogger.LogEventAsync(new RoleDeletedEvent<TRoleDto>(role));
 
             return HandleIdentityError(identityResult, IdentityServiceResources.RoleDeleteFailed().Description, IdentityServiceResources.IdentityErrorKey().Description, role);
+        }
+
+        public virtual async Task<UserEmailAddressesDto> GetUserEmailAddressesAsync(string userId)
+        {
+            var userExists = await IdentityRepository.ExistsUserAsync(userId);
+            if (!userExists) throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserDoesNotExist().Description, userId), IdentityServiceResources.UserDoesNotExist().Description);
+
+            var rows = await IdentityRepository.GetUserEmailAddressesAsync(userId);
+            var user = await IdentityRepository.GetUserAsync(userId);
+            var dto = new UserEmailAddressesDto
+            {
+                UserId = userId,
+                UserName = user.UserName,
+                EmailAddresses = Mapper.Map<List<UserEmailAddressDto>>(rows)
+            };
+
+            await AuditEventLogger.LogEventAsync(new UserEmailAddressesRequestedEvent(dto));
+            return dto;
+        }
+
+        public virtual async Task<UserEmailAddressDto> GetUserEmailAddressAsync(string userId, string emailAddressId)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(emailAddressId);
+            if (row == null || row.UserId != userId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, emailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+            return Mapper.Map<UserEmailAddressDto>(row);
+        }
+
+        public virtual async Task<IdentityResult> CreateUserEmailAddressAsync(UserEmailAddressDto dto)
+        {
+            var userExists = await IdentityRepository.ExistsUserAsync(dto.UserId);
+            if (!userExists) throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserDoesNotExist().Description, dto.UserId), IdentityServiceResources.UserDoesNotExist().Description);
+
+            var email = dto.Email.Trim();
+            var currentRows = await IdentityRepository.GetUserEmailAddressesAsync(dto.UserId);
+            if (currentRows.Count >= 3)
+                return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressLimitReached().Description });
+
+            var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
+            if (conflict != null) return conflict;
+
+            var entity = new UserEmailAddress
+            {
+                UserId = dto.UserId,
+                Email = email,
+                EmailConfirmed = true,                 // staff intervention implies verification
+                IsPrimary = currentRows.Count == 0     // first address becomes primary (and syncs Users.Email)
+            };
+            var result = await IdentityRepository.AddUserEmailAddressAsync(entity);
+
+            await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
+            return result;
+        }
+
+        public virtual async Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddressDto dto)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(dto.EmailAddressId);
+            if (row == null || row.UserId != dto.UserId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, dto.EmailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+
+            var email = dto.Email.Trim();
+            var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
+            if (conflict != null) return conflict;
+
+            row.Email = email;
+            row.EmailConfirmed = true;
+            var result = await IdentityRepository.UpdateUserEmailAddressAsync(row);
+
+            await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
+            return result;
+        }
+
+        public virtual async Task<IdentityResult> DeleteUserEmailAddressAsync(UserEmailAddressDto dto)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(dto.EmailAddressId);
+            if (row == null || row.UserId != dto.UserId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, dto.EmailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+
+            if (row.IsPrimary)
+                return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressPrimaryDelete().Description });
+
+            var result = await IdentityRepository.DeleteUserEmailAddressAsync(dto.EmailAddressId);
+            await AuditEventLogger.LogEventAsync(new UserEmailAddressDeletedEvent(dto));
+            return result;
+        }
+
+        public virtual async Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(emailAddressId);
+            if (row == null || row.UserId != userId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, emailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+
+            var result = await IdentityRepository.SetPrimaryUserEmailAddressAsync(userId, emailAddressId);
+            await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(row)));
+            return result;
+        }
+
+        // First-to-confirm semantics: a CONFIRMED row on another account blocks; unconfirmed
+        // cross-account rows are stale claims and are cleared.
+        private async Task<IdentityResult> ResolveCrossAccountConflictAsync(string userId, string email)
+        {
+            var allRows = await IdentityRepository.GetUserEmailAddressesByEmailAsync(email);
+            if (allRows.Any(r => r.EmailConfirmed && r.UserId != userId))
+                return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });
+
+            foreach (var stale in allRows.Where(r => !r.EmailConfirmed && r.UserId != userId))
+            {
+                await IdentityRepository.DeleteUserEmailAddressAsync(stale.Id);
+            }
+            return null;
         }
     }
 }
