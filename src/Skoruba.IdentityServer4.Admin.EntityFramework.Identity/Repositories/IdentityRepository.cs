@@ -517,11 +517,12 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         }
 
         // Wraps the row-save + Users table sync in one transaction so a second-save failure
-        // can't leave the email row and Users.Email diverged. InMemory provider (unit tests)
-        // doesn't support transactions, so it's skipped there.
-        private async Task<IdentityResult> ExecuteInTransactionAsync(Func<Task<IdentityResult>> action)
+        // can't leave the email row and Users.Email diverged. Joins an ambient transaction when
+        // one is already open. InMemory provider (unit tests) doesn't support transactions,
+        // so it's skipped there.
+        public virtual async Task<IdentityResult> ExecuteInTransactionAsync(Func<Task<IdentityResult>> action)
         {
-            if (!DbContext.Database.IsRelational())
+            if (!DbContext.Database.IsRelational() || DbContext.Database.CurrentTransaction != null)
             {
                 return await action();
             }

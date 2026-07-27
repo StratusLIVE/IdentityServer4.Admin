@@ -534,17 +534,20 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             if (currentRows.Count >= 3)
                 return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressLimitReached().Description });
 
-            var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
-            if (conflict != null) return conflict;
-
-            var entity = new UserEmailAddress
+            var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
             {
-                UserId = dto.UserId,
-                Email = email,
-                EmailConfirmed = true,                 // staff intervention implies verification
-                IsPrimary = currentRows.Count == 0     // first address becomes primary (and syncs Users.Email)
-            };
-            var result = await IdentityRepository.AddUserEmailAddressAsync(entity);
+                var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
+                if (conflict != null) return conflict;
+
+                var entity = new UserEmailAddress
+                {
+                    UserId = dto.UserId,
+                    Email = email,
+                    EmailConfirmed = true,                 // staff intervention implies verification
+                    IsPrimary = currentRows.Count == 0     // first address becomes primary (and syncs Users.Email)
+                };
+                return await IdentityRepository.AddUserEmailAddressAsync(entity);
+            });
 
             await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
             return result;
@@ -557,12 +560,15 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, dto.EmailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
 
             var email = dto.Email.Trim();
-            var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
-            if (conflict != null) return conflict;
+            var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
+            {
+                var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
+                if (conflict != null) return conflict;
 
-            row.Email = email;
-            row.EmailConfirmed = true;
-            var result = await IdentityRepository.UpdateUserEmailAddressAsync(row);
+                row.Email = email;
+                row.EmailConfirmed = true;
+                return await IdentityRepository.UpdateUserEmailAddressAsync(row);
+            });
 
             await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
             return result;
