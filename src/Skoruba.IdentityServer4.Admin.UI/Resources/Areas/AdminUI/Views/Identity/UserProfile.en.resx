@@ -129,6 +129,9 @@
   <data name="ButtonManageUserClaims" xml:space="preserve">
     <value>Manage User Claims</value>
   </data>
+  <data name="ButtonManageUserEmailAddresses" xml:space="preserve">
+    <value>Manage Email Addresses</value>
+  </data>
   <data name="ButtonManageUserExternalProviders" xml:space="preserve">
     <value>Manage User External Providers</value>
   </data>

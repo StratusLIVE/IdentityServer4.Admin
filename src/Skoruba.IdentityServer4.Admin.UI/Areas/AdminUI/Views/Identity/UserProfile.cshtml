@@ -34,6 +34,7 @@
             <div class="col-md-12 col-m-b-10  col-m-t-10">
                 <a asp-area="@CommonConsts.AdminUIArea" asp-action="ResendConfirmationEmail" asp-route-id="@Model.Id" class="btn btn-outline-primary">Resend Confirmation Email</a>
                 <a asp-area="@CommonConsts.AdminUIArea" asp-action="UserClaims" asp-route-id="@Model.Id" class="btn btn-outline-primary">@Localizer["ButtonManageUserClaims"]</a>
+                <a asp-area="@CommonConsts.AdminUIArea" asp-action="UserEmailAddresses" asp-route-id="@Model.Id" class="btn btn-outline-primary">@Localizer["ButtonManageUserEmailAddresses"]</a>
                 <a asp-area="@CommonConsts.AdminUIArea" asp-action="UserRoles" asp-route-id="@Model.Id" class="btn btn-outline-primary">@Localizer["ButtonManageUserRoles"]</a>
                 <a asp-area="@CommonConsts.AdminUIArea" asp-action="UserProviders" asp-route-id="@Model.Id" class="btn btn-outline-primary">@Localizer["ButtonManageUserExternalProviders"]</a>
                 <a asp-area="@CommonConsts.AdminUIArea" asp-action="AuditLog" asp-controller="Log" asp-route-subjectIdentifier="@Model.Id" class="btn btn-primary">@Localizer["Audit Log"]</a>

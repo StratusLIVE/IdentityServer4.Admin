@@ -326,6 +326,92 @@ namespace Skoruba.IdentityServer4.Admin.UI.Areas.AdminUI.Controllers
         }
 
         [HttpGet]
+        public async Task<IActionResult> UserEmailAddresses(TKey id)
+        {
+            if (EqualityComparer<TKey>.Default.Equals(id, default)) return NotFound();
+            var emails = await _identityService.GetUserEmailAddressesAsync(id.ToString());
+            return View(emails);
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> UserEmailAddress(TKey id, string emailAddressId)
+        {
+            if (EqualityComparer<TKey>.Default.Equals(id, default)) return NotFound();
+            var user = await _identityService.GetUserAsync(id.ToString());
+
+            if (string.IsNullOrEmpty(emailAddressId))
+            {
+                return View(new UserEmailAddressDto { UserId = id.ToString(), UserName = user.UserName });
+            }
+
+            var dto = await _identityService.GetUserEmailAddressAsync(id.ToString(), emailAddressId);
+            dto.UserName = user.UserName;
+            return View(dto);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UserEmailAddress(UserEmailAddressDto emailAddress)
+        {
+            if (!ModelState.IsValid) return View(emailAddress);
+
+            var result = string.IsNullOrEmpty(emailAddress.EmailAddressId)
+                ? await _identityService.CreateUserEmailAddressAsync(emailAddress)
+                : await _identityService.UpdateUserEmailAddressAsync(emailAddress);
+
+            if (!result.Succeeded)
+            {
+                foreach (var error in result.Errors) ModelState.AddModelError(string.Empty, error.Description);
+                return View(emailAddress);
+            }
+
+            SuccessNotification(string.Format(_localizer["SuccessSaveUserEmailAddress"], emailAddress.Email), _localizer["SuccessTitle"]);
+            return RedirectToAction(nameof(UserEmailAddresses), new { Id = emailAddress.UserId });
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> UserEmailAddressDelete(TKey id, string emailAddressId)
+        {
+            if (EqualityComparer<TKey>.Default.Equals(id, default)) return NotFound();
+            var dto = await _identityService.GetUserEmailAddressAsync(id.ToString(), emailAddressId);
+            var user = await _identityService.GetUserAsync(id.ToString());
+            dto.UserName = user.UserName;
+            return View(dto);
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UserEmailAddressDelete(UserEmailAddressDto emailAddress)
+        {
+            var result = await _identityService.DeleteUserEmailAddressAsync(emailAddress);
+            if (!result.Succeeded)
+            {
+                foreach (var error in result.Errors) ModelState.AddModelError(string.Empty, error.Description);
+                return View(emailAddress);
+            }
+
+            SuccessNotification(string.Format(_localizer["SuccessDeleteUserEmailAddress"], emailAddress.Email), _localizer["SuccessTitle"]);
+            return RedirectToAction(nameof(UserEmailAddresses), new { Id = emailAddress.UserId });
+        }
+
+        [HttpPost]
+        [ValidateAntiForgeryToken]
+        public async Task<IActionResult> UserEmailAddressSetPrimary(TKey id, string emailAddressId)
+        {
+            if (EqualityComparer<TKey>.Default.Equals(id, default)) return NotFound();
+            var result = await _identityService.SetPrimaryUserEmailAddressAsync(id.ToString(), emailAddressId);
+            if (!result.Succeeded && result.Errors.Any())
+            {
+                ErrorNotification(result.Errors.First().Description, _localizer["ErrorTitle"]);
+            }
+            else
+            {
+                SuccessNotification(_localizer["SuccessSetPrimaryUserEmailAddress"], _localizer["SuccessTitle"]);
+            }
+            return RedirectToAction(nameof(UserEmailAddresses), new { Id = id });
+        }
+
+        [HttpGet]
         public async Task<IActionResult> UserProviders(TKey id)
         {
             if (EqualityComparer<TKey>.Default.Equals(id, default)) return NotFound();
