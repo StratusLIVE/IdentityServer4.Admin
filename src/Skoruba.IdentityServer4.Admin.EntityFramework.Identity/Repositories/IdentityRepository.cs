@@ -437,7 +437,10 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         public virtual Task<List<UserEmailAddress>> GetUserEmailAddressesByEmailAsync(string email)
         {
             // Duplicate rows across accounts are expected (legacy migration data) — never Single here.
-            return UserEmailAddresses.Where(e => e.Email == email).ToListAsync();
+            // Match NormalizedEmail primarily; legacy rows may have null NormalizedEmail, so keep the
+            // raw Email fallback rather than relying on DB collation alone.
+            var normalized = UserManager.NormalizeEmail(email);
+            return UserEmailAddresses.Where(e => e.NormalizedEmail == normalized || e.Email == email).ToListAsync();
         }
 
         public virtual Task<bool> AnyOtherUserWithConfirmedEmailAsync(string email, string excludeUserId)
