@@ -93,6 +93,8 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.In
 
         Task<List<UserEmailAddress>> GetUserEmailAddressesByEmailAsync(string email);
 
+        Task<bool> AnyOtherUserWithConfirmedEmailAsync(string email, string excludeUserId);
+
         Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress);
 
         Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddress emailAddress);

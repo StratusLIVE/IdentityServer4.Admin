@@ -400,9 +400,10 @@ namespace Skoruba.IdentityServer4.Admin.UI.Areas.AdminUI.Controllers
         {
             if (EqualityComparer<TKey>.Default.Equals(id, default)) return NotFound();
             var result = await _identityService.SetPrimaryUserEmailAddressAsync(id.ToString(), emailAddressId);
-            if (!result.Succeeded && result.Errors.Any())
+            if (!result.Succeeded)
             {
-                ErrorNotification(result.Errors.First().Description, _localizer["ErrorTitle"]);
+                var errorDescription = result.Errors.FirstOrDefault()?.Description ?? "Failed to set primary email address.";
+                ErrorNotification(errorDescription, _localizer["ErrorTitle"]);
             }
             else
             {

@@ -589,14 +589,27 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, emailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
 
             var result = await IdentityRepository.SetPrimaryUserEmailAddressAsync(userId, emailAddressId);
-            await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(row)));
+            if (result.Succeeded)
+            {
+                var updatedRow = await IdentityRepository.GetUserEmailAddressAsync(emailAddressId);
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(updatedRow)));
+            }
+            else
+            {
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(row)));
+            }
             return result;
         }
 
         // First-to-confirm semantics: a CONFIRMED row on another account blocks; unconfirmed
-        // cross-account rows are stale claims and are cleared.
+        // cross-account rows are stale claims and are cleared. Also blocks on a confirmed
+        // Users.Email match with no corresponding UserEmailAddresses row (legacy accounts).
         private async Task<IdentityResult> ResolveCrossAccountConflictAsync(string userId, string email)
         {
+            var confirmedOnOtherUser = await IdentityRepository.AnyOtherUserWithConfirmedEmailAsync(email, userId);
+            if (confirmedOnOtherUser)
+                return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });
+
             var allRows = await IdentityRepository.GetUserEmailAddressesByEmailAsync(email);
             if (allRows.Any(r => r.EmailConfirmed && r.UserId != userId))
                 return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });

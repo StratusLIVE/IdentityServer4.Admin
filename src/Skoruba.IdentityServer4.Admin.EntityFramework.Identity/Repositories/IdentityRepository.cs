@@ -440,7 +440,19 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             return UserEmailAddresses.Where(e => e.Email == email).ToListAsync();
         }
 
-        public virtual async Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress)
+        public virtual Task<bool> AnyOtherUserWithConfirmedEmailAsync(string email, string excludeUserId)
+        {
+            var id = ConvertKeyFromString(excludeUserId);
+            var normalized = UserManager.NormalizeEmail(email);
+            return UserManager.Users.AnyAsync(u => u.NormalizedEmail == normalized && u.EmailConfirmed && !u.Id.Equals(id));
+        }
+
+        public virtual Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress)
+        {
+            return ExecuteInTransactionAsync(() => AddUserEmailAddressCoreAsync(emailAddress));
+        }
+
+        private async Task<IdentityResult> AddUserEmailAddressCoreAsync(UserEmailAddress emailAddress)
         {
             emailAddress.Id = Guid.NewGuid().ToString();
             emailAddress.NormalizedEmail = UserManager.NormalizeEmail(emailAddress.Email);
@@ -453,7 +465,12 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             return IdentityResult.Success;
         }
 
-        public virtual async Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddress emailAddress)
+        public virtual Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddress emailAddress)
+        {
+            return ExecuteInTransactionAsync(() => UpdateUserEmailAddressCoreAsync(emailAddress));
+        }
+
+        private async Task<IdentityResult> UpdateUserEmailAddressCoreAsync(UserEmailAddress emailAddress)
         {
             var existing = await UserEmailAddresses.SingleOrDefaultAsync(e => e.Id == emailAddress.Id);
             if (existing == null) return IdentityResult.Failed(new IdentityError { Description = "Email address not found." });
@@ -478,7 +495,12 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             return IdentityResult.Success;
         }
 
-        public virtual async Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId)
+        public virtual Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId)
+        {
+            return ExecuteInTransactionAsync(() => SetPrimaryUserEmailAddressCoreAsync(userId, emailAddressId));
+        }
+
+        private async Task<IdentityResult> SetPrimaryUserEmailAddressCoreAsync(string userId, string emailAddressId)
         {
             var rows = await UserEmailAddresses.Where(e => e.UserId == userId).ToListAsync();
             var target = rows.SingleOrDefault(e => e.Id == emailAddressId);
@@ -489,6 +511,25 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             target.EmailConfirmed = true;
             await AutoSaveChangesAsync();
             return await SyncUserPrimaryEmailAsync(userId, target.Email);
+        }
+
+        // Wraps the row-save + Users table sync in one transaction so a second-save failure
+        // can't leave the email row and Users.Email diverged. InMemory provider (unit tests)
+        // doesn't support transactions, so it's skipped there.
+        private async Task<IdentityResult> ExecuteInTransactionAsync(Func<Task<IdentityResult>> action)
+        {
+            if (!DbContext.Database.IsRelational())
+            {
+                return await action();
+            }
+
+            await using var transaction = await DbContext.Database.BeginTransactionAsync();
+            var result = await action();
+            if (result.Succeeded)
+            {
+                await transaction.CommitAsync();
+            }
+            return result;
         }
 
         // Keeps Users.Email/NormalizedEmail in lockstep with the primary UserEmailAddresses row

@@ -753,6 +753,69 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
         }
 
         [Fact]
+        public async Task AddUserEmailAddress_ConfirmedUsersEmailOnOtherAccount_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+                otherUser.EmailConfirmed = true;
+                await context.SaveChangesAsync();
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = otherUser.Email,
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+            }
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_UnconfirmedUsersEmailOnOtherAccount_Succeeds()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+                otherUser.EmailConfirmed = false;
+                await context.SaveChangesAsync();
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = otherUser.Email,
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeTrue();
+            }
+        }
+
+        [Fact]
         public async Task DeleteUserEmailAddress_Primary_Fails()
         {
             using (var context = new AdminIdentityDbContext(_dbContextOptions))
