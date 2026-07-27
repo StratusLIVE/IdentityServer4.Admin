@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Common;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Enums;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Extensions;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.Interfaces;
 
 namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
@@ -72,12 +73,27 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         public virtual async Task<PagedList<TUser>> GetUsersAsync(string search, int page = 1, int pageSize = 10)
         {
             var pagedList = new PagedList<TUser>();
-            Expression<Func<TUser, bool>> searchCondition = x => x.UserName.Contains(search) || x.Email.Contains(search);
+
+            // Users whose secondary/legacy email matches — resolved first because UserEmailAddress.UserId
+            // is string while TUser.Id is TKey; the id list translates to a SQL IN clause.
+            var emailMatchIds = new List<TKey>();
+            if (!string.IsNullOrEmpty(search))
+            {
+                emailMatchIds = (await DbContext.Set<UserEmailAddress>()
+                        .Where(e => e.Email.Contains(search))
+                        .Select(e => e.UserId)
+                        .Distinct()
+                        .ToListAsync())
+                    .Select(ConvertKeyFromString)
+                    .ToList();
+            }
+
+            Expression<Func<TUser, bool>> searchCondition = x =>
+                x.UserName.Contains(search) || x.Email.Contains(search) || emailMatchIds.Contains(x.Id);
 
             var users = await UserManager.Users.WhereIf(!string.IsNullOrEmpty(search), searchCondition).PageBy(x => x.Id, page, pageSize).ToListAsync();
 
             pagedList.Data.AddRange(users);
-
             pagedList.TotalCount = await UserManager.Users.WhereIf(!string.IsNullOrEmpty(search), searchCondition).CountAsync();
             pagedList.PageSize = pageSize;
 
@@ -399,6 +415,87 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         public virtual async Task<int> SaveAllChangesAsync()
         {
             return await DbContext.SaveChangesAsync();
+        }
+
+        protected DbSet<UserEmailAddress> UserEmailAddresses => DbContext.Set<UserEmailAddress>();
+
+        public virtual Task<List<UserEmailAddress>> GetUserEmailAddressesAsync(string userId)
+        {
+            return UserEmailAddresses.Where(e => e.UserId == userId).OrderByDescending(e => e.IsPrimary).ThenBy(e => e.Email).ToListAsync();
+        }
+
+        public virtual Task<UserEmailAddress> GetUserEmailAddressAsync(string emailAddressId)
+        {
+            return UserEmailAddresses.SingleOrDefaultAsync(e => e.Id == emailAddressId);
+        }
+
+        public virtual Task<List<UserEmailAddress>> GetUserEmailAddressesByEmailAsync(string email)
+        {
+            // Duplicate rows across accounts are expected (legacy migration data) — never Single here.
+            return UserEmailAddresses.Where(e => e.Email == email).ToListAsync();
+        }
+
+        public virtual async Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress)
+        {
+            emailAddress.Id = Guid.NewGuid().ToString();
+            emailAddress.NormalizedEmail = UserManager.NormalizeEmail(emailAddress.Email);
+            await UserEmailAddresses.AddAsync(emailAddress);
+            await AutoSaveChangesAsync();
+            if (emailAddress.IsPrimary)
+            {
+                return await SyncUserPrimaryEmailAsync(emailAddress.UserId, emailAddress.Email);
+            }
+            return IdentityResult.Success;
+        }
+
+        public virtual async Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddress emailAddress)
+        {
+            var existing = await UserEmailAddresses.SingleOrDefaultAsync(e => e.Id == emailAddress.Id);
+            if (existing == null) return IdentityResult.Failed(new IdentityError { Description = "Email address not found." });
+
+            existing.Email = emailAddress.Email;
+            existing.NormalizedEmail = UserManager.NormalizeEmail(emailAddress.Email);
+            existing.EmailConfirmed = emailAddress.EmailConfirmed;
+            await AutoSaveChangesAsync();
+            if (existing.IsPrimary)
+            {
+                return await SyncUserPrimaryEmailAsync(existing.UserId, existing.Email);
+            }
+            return IdentityResult.Success;
+        }
+
+        public virtual async Task<IdentityResult> DeleteUserEmailAddressAsync(string emailAddressId)
+        {
+            var existing = await UserEmailAddresses.SingleOrDefaultAsync(e => e.Id == emailAddressId);
+            if (existing == null) return IdentityResult.Failed(new IdentityError { Description = "Email address not found." });
+            UserEmailAddresses.Remove(existing);
+            await AutoSaveChangesAsync();
+            return IdentityResult.Success;
+        }
+
+        public virtual async Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId)
+        {
+            var rows = await UserEmailAddresses.Where(e => e.UserId == userId).ToListAsync();
+            var target = rows.SingleOrDefault(e => e.Id == emailAddressId);
+            if (target == null) return IdentityResult.Failed(new IdentityError { Description = "Email address not found." });
+
+            foreach (var row in rows.Where(r => r.IsPrimary && r.Id != emailAddressId)) row.IsPrimary = false;
+            target.IsPrimary = true;
+            target.EmailConfirmed = true;
+            await AutoSaveChangesAsync();
+            return await SyncUserPrimaryEmailAsync(userId, target.Email);
+        }
+
+        // Keeps Users.Email/NormalizedEmail in lockstep with the primary UserEmailAddresses row
+        // (drift between the two causes sign-in loops — the GMWC incident).
+        protected virtual async Task<IdentityResult> SyncUserPrimaryEmailAsync(string userId, string email)
+        {
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null) return IdentityResult.Failed(new IdentityError { Description = "User not found." });
+            user.Email = email;
+            user.NormalizedEmail = UserManager.NormalizeEmail(email);
+            user.EmailConfirmed = true;
+            return await UserManager.UpdateAsync(user);
         }
     }
 }

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Identity;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Common;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 
 namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.Interfaces
 {
@@ -85,5 +86,19 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.In
         bool AutoSaveChanges { get; set; }
 
         Task<int> SaveAllChangesAsync();
+
+        Task<List<UserEmailAddress>> GetUserEmailAddressesAsync(string userId);
+
+        Task<UserEmailAddress> GetUserEmailAddressAsync(string emailAddressId);
+
+        Task<List<UserEmailAddress>> GetUserEmailAddressesByEmailAsync(string email);
+
+        Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress);
+
+        Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddress emailAddress);
+
+        Task<IdentityResult> DeleteUserEmailAddressAsync(string emailAddressId);
+
+        Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId);
     }
 }
