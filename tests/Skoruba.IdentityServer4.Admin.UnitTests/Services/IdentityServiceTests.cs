@@ -1024,6 +1024,65 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
         }
 
         [Fact]
+        public async Task SetPrimaryUserEmailAddress_ConfirmedOnOtherAccount_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                var sharedEmail = "contested@example.com";
+                await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, true);   // other account confirmed it
+                var primaryRow = await AddEmailRowAsync(context, user.Id, user.Email, true, true);
+                var legacyRow = await AddEmailRowAsync(context, user.Id, sharedEmail, false, false); // own legacy unconfirmed row
+
+                var result = await identityService.SetPrimaryUserEmailAddressAsync(user.Id, legacyRow.Id);
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+
+                var reloadedLegacy = await context.Set<UserEmailAddress>().Where(x => x.Id == legacyRow.Id).SingleOrDefaultAsync();
+                reloadedLegacy.IsPrimary.Should().BeFalse();
+                reloadedLegacy.EmailConfirmed.Should().BeFalse();
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(primaryRow.Email);
+            }
+        }
+
+        [Fact]
+        public async Task SetPrimaryUserEmailAddress_ConfirmedUsersEmailOnOtherAccount_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+                otherUser.EmailConfirmed = true;
+                await context.SaveChangesAsync();
+
+                var legacyRow = await AddEmailRowAsync(context, user.Id, otherUser.Email, false, false);
+
+                var result = await identityService.SetPrimaryUserEmailAddressAsync(user.Id, legacyRow.Id);
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+            }
+        }
+
+        [Fact]
         public async Task UpdateUserEmailAddress_PrimaryRow_SyncsUsersEmail()
         {
             using (var context = new AdminIdentityDbContext(_dbContextOptions))

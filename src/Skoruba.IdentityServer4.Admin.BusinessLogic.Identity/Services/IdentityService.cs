@@ -609,15 +609,20 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             if (row == null || row.UserId != userId)
                 throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, emailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
 
-            var result = await IdentityRepository.SetPrimaryUserEmailAddressAsync(userId, emailAddressId);
+            var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
+            {
+                // Promotion confirms the row and rewrites Users.Email, so it must pass the same
+                // cross-account ownership check as create/update (review #2).
+                var conflict = await ResolveCrossAccountConflictAsync(userId, row.Email);
+                if (conflict != null) return conflict;
+
+                return await IdentityRepository.SetPrimaryUserEmailAddressAsync(userId, emailAddressId);
+            });
+
             if (result.Succeeded)
             {
                 var updatedRow = await IdentityRepository.GetUserEmailAddressAsync(emailAddressId);
                 await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(updatedRow)));
-            }
-            else
-            {
-                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(row)));
             }
             return result;
         }
