@@ -530,28 +530,39 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             if (!userExists) throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserDoesNotExist().Description, dto.UserId), IdentityServiceResources.UserDoesNotExist().Description);
 
             var email = dto.Email.Trim();
-            var currentRows = await IdentityRepository.GetUserEmailAddressesAsync(dto.UserId);
-            if (currentRows.Count >= 3)
-                return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressLimitReached().Description });
-
-            IdentityResult conflictResult = null;
+            UserEmailAddress entity = null;
             var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
             {
-                var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
-                if (conflict != null) return conflictResult = conflict;
+                var user = await IdentityRepository.GetUserAsync(dto.UserId);
+                var currentRows = await IdentityRepository.GetUserEmailAddressesAsync(dto.UserId);
 
-                var entity = new UserEmailAddress
+                // Legacy accounts predate UserEmailAddresses: materialize Users.Email as the primary
+                // row first so the added address can never steal primary from the login email.
+                if (currentRows.Count == 0 && !string.IsNullOrEmpty(user.Email))
+                {
+                    var bootstrap = await IdentityRepository.EnsurePrimaryEmailRowAsync(dto.UserId);
+                    if (!bootstrap.Succeeded) return bootstrap;
+                    currentRows = await IdentityRepository.GetUserEmailAddressesAsync(dto.UserId);
+                }
+
+                if (currentRows.Count >= 3)
+                    return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressLimitReached().Description });
+
+                var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
+                if (conflict != null) return conflict;
+
+                entity = new UserEmailAddress
                 {
                     UserId = dto.UserId,
                     Email = email,
                     EmailConfirmed = true,                 // staff intervention implies verification
-                    IsPrimary = currentRows.Count == 0     // first address becomes primary (and syncs Users.Email)
+                    IsPrimary = currentRows.Count == 0     // only a user with no email at all gets a new primary
                 };
                 return await IdentityRepository.AddUserEmailAddressAsync(entity);
             });
 
-            if (conflictResult == null)
-                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
+            if (result.Succeeded)
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(entity)));
             return result;
         }
 

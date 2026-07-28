@@ -684,6 +684,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var userDto = IdentityDtoMock<string>.GenerateRandomUser();
                 await identityService.CreateUserAsync(userDto);
                 var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+                var originalEmail = user.Email;
 
                 var dto = new UserEmailAddressDto
                 {
@@ -700,6 +701,69 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var row = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.Email == dto.Email).SingleOrDefaultAsync();
                 row.Should().NotBeNull();
                 row.EmailConfirmed.Should().BeTrue();
+
+                // Regression (review #1): adding an address must not steal primary from a legacy login email.
+                row.IsPrimary.Should().BeFalse();
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(originalEmail);
+                var primaryRow = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.IsPrimary).SingleOrDefaultAsync();
+                primaryRow.Should().NotBeNull();
+                primaryRow.Email.Should().Be(originalEmail);
+                primaryRow.EmailConfirmed.Should().BeTrue();
+            }
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_UserWithoutEmail_BecomesPrimaryAndSyncs()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+                user.Email = null;
+                user.NormalizedEmail = null;
+                await context.SaveChangesAsync();
+
+                var dto = new UserEmailAddressDto
+                {
+                    UserId = user.Id,
+                    Email = "first@example.com",
+                    EmailConfirmed = false,
+                    IsPrimary = false
+                };
+
+                var result = await identityService.CreateUserEmailAddressAsync(dto);
+
+                result.Succeeded.Should().BeTrue();
+                var row = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).SingleOrDefaultAsync();
+                row.IsPrimary.Should().BeTrue();
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be("first@example.com");
+            }
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_LegacyUser_LimitCountsBootstrappedRow()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                // Legacy user (Users.Email, zero rows) gets a bootstrapped primary + 2 custom rows = cap.
+                (await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = user.Id, Email = "extra1@example.com" })).Succeeded.Should().BeTrue();
+                (await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = user.Id, Email = "extra2@example.com" })).Succeeded.Should().BeTrue();
+                var third = await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = user.Id, Email = "extra3@example.com" });
+
+                third.Succeeded.Should().BeFalse();
+                third.Errors.Should().Contain(e => e.Description.Contains("at most 3"));
+                (await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).CountAsync()).Should().Be(3);
             }
         }
 
