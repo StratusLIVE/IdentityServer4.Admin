@@ -104,5 +104,7 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.In
         Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId);
 
         Task<IdentityResult> ExecuteInTransactionAsync(Func<Task<IdentityResult>> action);
+
+        Task<IdentityResult> EnsurePrimaryEmailRowAsync(string userId);
     }
 }

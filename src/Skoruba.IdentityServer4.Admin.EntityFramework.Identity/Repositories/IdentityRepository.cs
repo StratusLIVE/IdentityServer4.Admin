@@ -549,16 +549,30 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             return await UserManager.UpdateAsync(user);
         }
 
+        // Materializes a primary row from Users.Email for legacy accounts that predate the
+        // UserEmailAddresses table (no-op when a primary row already exists or the user has no email).
+        public virtual async Task<IdentityResult> EnsurePrimaryEmailRowAsync(string userId)
+        {
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null) return IdentityResult.Failed(new IdentityError { Description = "User not found." });
+            return await SyncPrimaryEmailRowAsync(user);
+        }
+
         // Editing Users.Email on the admin user page must not strand the old value in the
         // primary UserEmailAddresses row (drift causes sign-in loops).
-        protected virtual async Task SyncPrimaryEmailRowAsync(TUser user)
+        protected virtual async Task<IdentityResult> SyncPrimaryEmailRowAsync(TUser user)
         {
-            if (string.IsNullOrEmpty(user.Email)) return;
+            if (string.IsNullOrEmpty(user.Email)) return IdentityResult.Success;
 
             var userId = user.Id.ToString();
             var primary = await UserEmailAddresses.FirstOrDefaultAsync(e => e.UserId == userId && e.IsPrimary);
             if (primary == null)
             {
+                // Never push a user past the 3-row cap: with 3 non-primary rows the insert is
+                // skipped and Users.Email stays authoritative for login.
+                var rowCount = await UserEmailAddresses.CountAsync(e => e.UserId == userId);
+                if (rowCount >= 3) return IdentityResult.Success;
+
                 await UserEmailAddresses.AddAsync(new UserEmailAddress
                 {
                     Id = Guid.NewGuid().ToString(),
@@ -577,6 +591,7 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                 primary.EmailConfirmed = true;
                 await AutoSaveChangesAsync();
             }
+            return IdentityResult.Success;
         }
     }
 }
