@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Moq;
 using Skoruba.AuditLogging.Services;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity;
+using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Events.Identity;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Mappers;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services;
@@ -108,6 +109,18 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             UserClaimsDto<UserClaimDto<string>, string>, UserProviderDto<string>, UserProvidersDto<UserProviderDto<string>, string>, UserChangePasswordDto<string>,
             RoleClaimsDto<RoleClaimDto<string>, string>, UserClaimDto<string>, RoleClaimDto<string>, UserEmailDto<string>> GetIdentityService(AdminIdentityDbContext context)
         {
+            return GetIdentityService(context, new Mock<IAuditEventLogger>().Object);
+        }
+
+        private IIdentityService<UserDto<string>, RoleDto<string>, UserIdentity,
+            UserIdentityRole, string,
+            UserIdentityUserClaim, UserIdentityUserRole, UserIdentityUserLogin, UserIdentityRoleClaim,
+            UserIdentityUserToken,
+            UsersDto<UserDto<string>, string>, RolesDto<RoleDto<string>, string>,
+            UserRolesDto<RoleDto<string>, string>,
+            UserClaimsDto<UserClaimDto<string>, string>, UserProviderDto<string>, UserProvidersDto<UserProviderDto<string>, string>, UserChangePasswordDto<string>,
+            RoleClaimsDto<RoleClaimDto<string>, string>, UserClaimDto<string>, RoleClaimDto<string>, UserEmailDto<string>> GetIdentityService(AdminIdentityDbContext context, IAuditEventLogger auditEventLogger)
+        {
             var testUserManager = GetTestUserManager(context);
             var testRoleManager = GetTestRoleManager(context);
             var mapper = GetMapper();
@@ -115,12 +128,7 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             var identityRepository = GetIdentityRepository(context, testUserManager, testRoleManager, mapper);
             var localizerIdentityResource = new IdentityServiceResources();
 
-            var auditLoggerMock = new Mock<IAuditEventLogger>();
-            var auditLogger = auditLoggerMock.Object;
-
-            var identityService = GetIdentityService(identityRepository, localizerIdentityResource, mapper, auditLogger);
-
-            return identityService;
+            return GetIdentityService(identityRepository, localizerIdentityResource, mapper, auditEventLogger);
         }
 
         [Fact]
@@ -1140,6 +1148,56 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 
                 result.Succeeded.Should().BeFalse();
                 result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+            }
+        }
+
+        [Fact]
+        public async Task SetPrimaryUserEmailAddress_Conflict_LogsNoSavedEvent()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var auditMock = new Mock<IAuditEventLogger>();
+                var identityService = GetIdentityService(context, auditMock.Object);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                var sharedEmail = "auditcase@example.com";
+                await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, true);
+                var legacyRow = await AddEmailRowAsync(context, user.Id, sharedEmail, false, false);
+
+                var result = await identityService.SetPrimaryUserEmailAddressAsync(user.Id, legacyRow.Id);
+
+                result.Succeeded.Should().BeFalse();
+                auditMock.Verify(x => x.LogEventAsync(It.IsAny<UserEmailAddressSavedEvent>()), Times.Never);
+            }
+        }
+
+        [Fact]
+        public async Task AddUserEmailAddress_LimitReached_LogsNoSavedEvent()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var auditMock = new Mock<IAuditEventLogger>();
+                var identityService = GetIdentityService(context, auditMock.Object);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                await AddEmailRowAsync(context, user.Id, "first@example.com", true, true);
+                await AddEmailRowAsync(context, user.Id, "second@example.com", false, true);
+                await AddEmailRowAsync(context, user.Id, "third@example.com", false, true);
+
+                var result = await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = user.Id, Email = "fourth@example.com" });
+
+                result.Succeeded.Should().BeFalse();
+                auditMock.Verify(x => x.LogEventAsync(It.IsAny<UserEmailAddressSavedEvent>()), Times.Never);
             }
         }
 

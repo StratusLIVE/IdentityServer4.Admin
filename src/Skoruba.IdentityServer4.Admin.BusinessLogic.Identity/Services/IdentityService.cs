@@ -573,19 +573,21 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, dto.EmailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
 
             var email = dto.Email.Trim();
-            IdentityResult conflictResult = null;
             var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
             {
                 var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
-                if (conflict != null) return conflictResult = conflict;
+                if (conflict != null) return conflict;
 
                 row.Email = email;
                 row.EmailConfirmed = true;
                 return await IdentityRepository.UpdateUserEmailAddressAsync(row);
             });
 
-            if (conflictResult == null)
-                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(dto));
+            if (result.Succeeded)
+            {
+                var persisted = await IdentityRepository.GetUserEmailAddressAsync(dto.EmailAddressId);
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(persisted)));
+            }
             return result;
         }
 
@@ -599,7 +601,8 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressPrimaryDelete().Description });
 
             var result = await IdentityRepository.DeleteUserEmailAddressAsync(dto.EmailAddressId);
-            await AuditEventLogger.LogEventAsync(new UserEmailAddressDeletedEvent(dto));
+            if (result.Succeeded)
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressDeletedEvent(Mapper.Map<UserEmailAddressDto>(row)));
             return result;
         }
 
