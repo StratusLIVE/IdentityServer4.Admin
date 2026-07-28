@@ -14,6 +14,7 @@ using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Mappers;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfaces;
+using Skoruba.IdentityServer4.Admin.BusinessLogic.Shared.ExceptionHandling;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.Interfaces;
@@ -967,6 +968,66 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var result = await identityService.CreateUserEmailAddressAsync(dto);
 
                 result.Succeeded.Should().BeTrue();
+            }
+        }
+
+        [Fact]
+        public async Task UpdateUser_EmailConfirmedOnOtherAccountRow_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+                var originalEmail = user.Email;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                // Confirmed secondary custom row on the other account — invisible to Identity's
+                // Users-table unique-email validation (review #3).
+                var sharedEmail = "secondary-owned@example.com";
+                await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, true);
+
+                userDto.Id = user.Id;
+                userDto.Email = sharedEmail;
+
+                // Service-level UpdateUserAsync throws UserFriendlyViewException on any failed
+                // IdentityResult (HandleIdentityError, IdentityService.cs:137-143).
+                Func<Task> act = () => identityService.UpdateUserAsync(userDto);
+                await act.Should().ThrowAsync<UserFriendlyViewException>();
+
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(originalEmail);
+            }
+        }
+
+        [Fact]
+        public async Task UpdateUser_UserWithThreeRowsAndNoPrimary_DoesNotCreateFourthRow()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                await AddEmailRowAsync(context, user.Id, "a@example.com", false, true);
+                await AddEmailRowAsync(context, user.Id, "b@example.com", false, true);
+                await AddEmailRowAsync(context, user.Id, "c@example.com", false, true);
+
+                userDto.Id = user.Id;
+                userDto.Email = "newlogin@example.com";
+                var (result, _) = await identityService.UpdateUserAsync(userDto);
+
+                result.Succeeded.Should().BeTrue();
+                (await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).CountAsync()).Should().Be(3);
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be("newlogin@example.com");
             }
         }
 

@@ -207,14 +207,32 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
 
         public virtual async Task<(IdentityResult identityResult, TKey userId)> UpdateUserAsync(TUser user)
         {
-            var userIdentity = await UserManager.FindByIdAsync(user.Id.ToString());
-            Mapper.Map(user, userIdentity);
-            var identityResult = await UserManager.UpdateAsync(userIdentity);
-
-            if (identityResult.Succeeded)
+            // Ownership check + Users update + primary-row sync in ONE transaction so a sync
+            // failure can't leave Users.Email diverged from the primary row (review #3/#5).
+            var identityResult = await ExecuteInTransactionAsync(async () =>
             {
-                await SyncPrimaryEmailRowAsync(user);
-            }
+                var userIdentity = await UserManager.FindByIdAsync(user.Id.ToString());
+
+                if (!string.IsNullOrEmpty(user.Email))
+                {
+                    var normalized = UserManager.NormalizeEmail(user.Email);
+                    if (!string.Equals(normalized, userIdentity.NormalizedEmail, StringComparison.Ordinal))
+                    {
+                        // Identity's unique-email validation only sees Users.Email; confirmed or
+                        // primary custom rows on other accounts must also block the change.
+                        var rows = await GetUserEmailAddressesByEmailAsync(user.Email);
+                        var userId = user.Id.ToString();
+                        if (rows.Any(r => r.UserId != userId && (r.EmailConfirmed || r.IsPrimary)))
+                            return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
+                    }
+                }
+
+                Mapper.Map(user, userIdentity);
+                var updateResult = await UserManager.UpdateAsync(userIdentity);
+                if (!updateResult.Succeeded) return updateResult;
+
+                return await SyncPrimaryEmailRowAsync(userIdentity);
+            });
 
             return (identityResult, user.Id);
         }
