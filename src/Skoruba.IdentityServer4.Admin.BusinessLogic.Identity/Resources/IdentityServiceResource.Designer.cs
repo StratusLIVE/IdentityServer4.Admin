@@ -251,6 +251,15 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources {
         }
 
         /// <summary>
+        ///   Looks up a localized string similar to Email {0} is already associated with this account.
+        /// </summary>
+        public static string UserEmailAddressDuplicate {
+            get {
+                return ResourceManager.GetString("UserEmailAddressDuplicate", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Looks up a localized string similar to User Provider deleting failed.
         /// </summary>
         public static string UserProviderDeleteFailed {

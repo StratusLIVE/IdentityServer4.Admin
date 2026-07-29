@@ -10,6 +10,9 @@
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
 		</PackageReference>
+		<!-- Relational provider for the transaction-rollback tests: ExecuteInTransactionAsync
+		     short-circuits on the InMemory provider, so rollback can only be proven here. -->
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
 		<PackageReference Include="Moq" Version="4.20.70" />
 		<PackageReference Update="Microsoft.NET.Test.Sdk" Version="17.10.0" />
 		<PackageReference Update="xunit" Version="2.8.1" />

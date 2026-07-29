@@ -103,6 +103,15 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources
             };
         }
 
+        public virtual ResourceMessage UserEmailAddressDuplicate()
+        {
+            return new ResourceMessage()
+            {
+                Code = nameof(UserEmailAddressDuplicate),
+                Description = IdentityServiceResource.UserEmailAddressDuplicate
+            };
+        }
+
         public virtual ResourceMessage UserDeleteFailed()
         {
             return new ResourceMessage()

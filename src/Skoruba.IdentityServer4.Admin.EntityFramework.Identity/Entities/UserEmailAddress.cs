@@ -4,6 +4,10 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities
     // PlatformDbContext; this app never migrates it).
     public class UserEmailAddress
     {
+        // Mirrors IdentityServer's AccountEmailService cap. Shared so the service-layer check and
+        // the primary-row sync in the repository can't drift apart.
+        public const int MaxPerUser = 3;
+
         public string Id { get; set; }
         public string UserId { get; set; }
         public string Email { get; set; }

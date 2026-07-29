@@ -578,37 +578,62 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
 
         // Editing Users.Email on the admin user page must not strand the old value in the
         // primary UserEmailAddresses row (drift causes sign-in loops).
+        //
+        // Match-first: if the user already has a row for this address, promote THAT row rather than
+        // writing the address into a second row. Both the insert branch and the primary-rewrite
+        // branch could otherwise produce two rows with the same Email on one user, which throws in
+        // IdentityServer's EmailAddressManager.GetEmailAsync (SingleOrDefault on a non-unique column)
+        // on the login-by-email path.
         protected virtual async Task<IdentityResult> SyncPrimaryEmailRowAsync(TUser user)
         {
             if (string.IsNullOrEmpty(user.Email)) return IdentityResult.Success;
 
             var userId = user.Id.ToString();
-            var primary = await UserEmailAddresses.FirstOrDefaultAsync(e => e.UserId == userId && e.IsPrimary);
-            if (primary == null)
-            {
-                // Never push a user past the 3-row cap: with 3 non-primary rows the insert is
-                // skipped and Users.Email stays authoritative for login.
-                var rowCount = await UserEmailAddresses.CountAsync(e => e.UserId == userId);
-                if (rowCount >= 3) return IdentityResult.Success;
+            var normalized = UserManager.NormalizeEmail(user.Email);
+            var rows = await UserEmailAddresses.Where(e => e.UserId == userId).ToListAsync();
 
-                await UserEmailAddresses.AddAsync(new UserEmailAddress
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    UserId = userId,
-                    Email = user.Email,
-                    NormalizedEmail = UserManager.NormalizeEmail(user.Email),
-                    EmailConfirmed = true,
-                    IsPrimary = true
-                });
+            // Legacy rows may have a null NormalizedEmail, so fall back to the raw address.
+            var match = rows.FirstOrDefault(e => e.NormalizedEmail == normalized
+                || (e.NormalizedEmail == null && string.Equals(e.Email, user.Email, StringComparison.OrdinalIgnoreCase)));
+
+            if (match != null)
+            {
+                foreach (var row in rows.Where(r => r.IsPrimary && r.Id != match.Id)) row.IsPrimary = false;
+                match.Email = user.Email;          // adopt the casing staff just entered
+                match.NormalizedEmail = normalized;
+                match.EmailConfirmed = true;
+                match.IsPrimary = true;
                 await AutoSaveChangesAsync();
+                return IdentityResult.Success;
             }
-            else if (!string.Equals(primary.Email, user.Email, StringComparison.OrdinalIgnoreCase))
+
+            var primary = rows.FirstOrDefault(e => e.IsPrimary);
+            if (primary != null)
             {
                 primary.Email = user.Email;
-                primary.NormalizedEmail = UserManager.NormalizeEmail(user.Email);
+                primary.NormalizedEmail = normalized;
                 primary.EmailConfirmed = true;
                 await AutoSaveChangesAsync();
+                return IdentityResult.Success;
             }
+
+            // No primary and no matching row: an insert is the only way to keep Users.Email and the
+            // primary row in lockstep. At the cap that is impossible, and silently succeeding would
+            // leave exactly the drift this sync exists to prevent — so surface it as a failure and
+            // let the caller's transaction roll the Users.Email write back.
+            if (rows.Count >= UserEmailAddress.MaxPerUser)
+                return IdentityResult.Failed(new IdentityError { Description = $"Cannot set {user.Email} as the primary email address: this user already has the maximum of {UserEmailAddress.MaxPerUser} email addresses and none of them match. Remove one first." });
+
+            await UserEmailAddresses.AddAsync(new UserEmailAddress
+            {
+                Id = Guid.NewGuid().ToString(),
+                UserId = userId,
+                Email = user.Email,
+                NormalizedEmail = normalized,
+                EmailConfirmed = true,
+                IsPrimary = true
+            });
+            await AutoSaveChangesAsync();
             return IdentityResult.Success;
         }
     }

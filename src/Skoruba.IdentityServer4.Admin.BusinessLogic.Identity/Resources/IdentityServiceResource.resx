@@ -180,6 +180,9 @@
   <data name="UserEmailAddressConflict" xml:space="preserve">
     <value>Email {0} is already associated with another account</value>
   </data>
+  <data name="UserEmailAddressDuplicate" xml:space="preserve">
+    <value>Email {0} is already associated with this account</value>
+  </data>
   <data name="UserProviderDeleteFailed" xml:space="preserve">
     <value>User Provider deleting failed</value>
   </data>

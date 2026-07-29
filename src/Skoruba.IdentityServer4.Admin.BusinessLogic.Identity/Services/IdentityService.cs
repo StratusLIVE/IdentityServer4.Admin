@@ -545,7 +545,12 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                     currentRows = await IdentityRepository.GetUserEmailAddressesAsync(dto.UserId);
                 }
 
-                if (currentRows.Count >= 3)
+                // Checked after the bootstrap so re-entering a legacy user's login email is caught,
+                // and before the cap so the rejection names the real reason.
+                var duplicate = await CheckSameUserDuplicateAsync(dto.UserId, email);
+                if (duplicate != null) return duplicate;
+
+                if (currentRows.Count >= UserEmailAddress.MaxPerUser)
                     return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressLimitReached().Description });
 
                 var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
@@ -575,6 +580,10 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             var email = dto.Email.Trim();
             var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
             {
+                // Excludes the row being edited, so re-saving a row with its own address still works.
+                var duplicate = await CheckSameUserDuplicateAsync(dto.UserId, email, dto.EmailAddressId);
+                if (duplicate != null) return duplicate;
+
                 var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
                 if (conflict != null) return conflict;
 
@@ -628,6 +637,21 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
                 await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(updatedRow)));
             }
             return result;
+        }
+
+        // IdentityServer owns this table and reads it with SingleOrDefault on the non-unique Email
+        // column (EmailAddressManager.GetEmailAsync), which is on the login-by-email, confirmation,
+        // password-reset and registration-unicity paths. A second row for the same address on the
+        // SAME user turns each of those into an InvalidOperationException, so the address must be
+        // unique per user. ResolveCrossAccountConflictAsync only examines other accounts
+        // (r.UserId != userId); this closes the same-account half.
+        private async Task<IdentityResult> CheckSameUserDuplicateAsync(string userId, string email, string excludeEmailAddressId = null)
+        {
+            var rows = await IdentityRepository.GetUserEmailAddressesByEmailAsync(email);
+            if (rows.Any(r => r.UserId == userId && r.Id != excludeEmailAddressId))
+                return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressDuplicate().Description, email) });
+
+            return null;
         }
 
         // First-to-confirm semantics: a CONFIRMED row on another account blocks, and so does a
