@@ -95,6 +95,13 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.In
 
         Task<bool> AnyOtherUserWithConfirmedEmailAsync(string email, string excludeUserId);
 
+        /// <summary>
+        /// Applies the first-to-confirm policy for an address across accounts: returns false when
+        /// another account holds a confirmed or primary claim, otherwise deletes that account's stale
+        /// unconfirmed non-primary rows and returns true. Must be called inside a transaction.
+        /// </summary>
+        Task<bool> TryResolveCrossAccountEmailConflictAsync(string userId, string email);
+
         Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress);
 
         Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddress emailAddress);

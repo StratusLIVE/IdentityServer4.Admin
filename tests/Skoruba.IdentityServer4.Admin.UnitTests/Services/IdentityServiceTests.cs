@@ -691,6 +691,9 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var identityService = GetIdentityService(context);
 
                 var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                // Explicit: the bootstrapped primary row mirrors Users.EmailConfirmed, and the fixture
+                // randomizes that flag — the assertion below would be a coin flip otherwise.
+                userDto.EmailConfirmed = true;
                 await identityService.CreateUserAsync(userDto);
                 var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
                 var originalEmail = user.Email;
@@ -1013,6 +1016,187 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             }
         }
 
+        // Round-3 critical: the profile path used to implement only the BLOCKING half of
+        // first-to-confirm. An unconfirmed non-primary row on another account passed the check and was
+        // left in place, while the sync gave the edited user a primary row for the same address —
+        // two rows, one address, which is what breaks EmailAddressManager.GetEmailAsync's
+        // SingleOrDefault on login-by-email, confirmation and password reset.
+        [Fact]
+        public async Task UpdateUser_UnconfirmedNonPrimaryRowOnOtherAccount_IsClearedAndSucceeds()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = true;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                // Ordinary self-service pending row: EmailAddressManager.AddEmailAsync creates rows
+                // exactly like this (unconfirmed, non-primary).
+                var sharedEmail = "pending@example.com";
+                var staleRow = await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, false);
+
+                userDto.Id = user.Id;
+                userDto.Email = sharedEmail;
+                var (result, _) = await identityService.UpdateUserAsync(userDto);
+
+                result.Succeeded.Should().BeTrue();
+
+                (await context.Set<UserEmailAddress>().Where(x => x.Id == staleRow.Id).SingleOrDefaultAsync())
+                    .Should().BeNull("the other account's stale claim must be deleted, not left alongside the new primary row");
+
+                // The load-bearing assertion: IdentityServer reads this column with SingleOrDefault.
+                var rowsForAddress = await context.Set<UserEmailAddress>()
+                    .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
+                rowsForAddress.Should().HaveCount(1);
+                rowsForAddress.Single().UserId.Should().Be(user.Id);
+                rowsForAddress.Single().IsPrimary.Should().BeTrue();
+                rowsForAddress.Single().EmailConfirmed.Should().BeTrue();
+
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(sharedEmail);
+            }
+        }
+
+        // The other half of the same policy: an unconfirmed row that is PRIMARY is a real account's
+        // login email, so it blocks and survives — deleting it would strand that user's Users.Email.
+        [Fact]
+        public async Task UpdateUser_UnconfirmedPrimaryRowOnOtherAccount_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+                var originalEmail = user.Email;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                var victimRow = await AddEmailRowAsync(context, otherUser.Id, "victim@example.com", true, false);
+
+                userDto.Id = user.Id;
+                userDto.Email = "victim@example.com";
+
+                Func<Task> act = () => identityService.UpdateUserAsync(userDto);
+                await act.Should().ThrowAsync<UserFriendlyViewException>();
+
+                (await context.Set<UserEmailAddress>().Where(x => x.Id == victimRow.Id).SingleOrDefaultAsync()).Should().NotBeNull();
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(originalEmail);
+            }
+        }
+
+        // Legacy account with a confirmed Users.Email and no row at all: the profile path now runs the
+        // same Users-table check the address pages do.
+        [Fact]
+        public async Task UpdateUser_ConfirmedUsersEmailOnOtherAccount_Fails()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+                var originalEmail = user.Email;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+                otherUser.EmailConfirmed = true;
+                await context.SaveChangesAsync();
+
+                userDto.Id = user.Id;
+                userDto.Email = otherUser.Email;
+
+                Func<Task> act = () => identityService.UpdateUserAsync(userDto);
+                await act.Should().ThrowAsync<UserFriendlyViewException>();
+
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(originalEmail);
+            }
+        }
+
+        // Round-3 important: Users.EmailConfirmed and the primary row must never disagree. The row
+        // mirrors the profile's checkbox, so an explicitly-cleared box leaves BOTH stores unconfirmed.
+        // Explicit false, never the randomized fixture value, so the mismatch cannot be masked.
+        [Fact]
+        public async Task UpdateUser_EmailConfirmedFalse_PrimaryRowIsUnconfirmed()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+                context.Entry(user).State = EntityState.Detached;
+
+                var newEmail = "needs-verification@example.com";
+                var userDtoForUpdate = IdentityDtoMock<string>.GenerateRandomUser(user.Id);
+                userDtoForUpdate.Email = newEmail;
+                userDtoForUpdate.EmailConfirmed = false;
+
+                var (result, _) = await identityService.UpdateUserAsync(userDtoForUpdate);
+                result.Succeeded.Should().BeTrue();
+
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(newEmail);
+                reloadedUser.EmailConfirmed.Should().BeFalse();
+
+                var primaryRow = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id && x.IsPrimary).SingleOrDefaultAsync();
+                primaryRow.Should().NotBeNull();
+                primaryRow.Email.Should().Be(newEmail);
+                primaryRow.EmailConfirmed.Should().Be(reloadedUser.EmailConfirmed);
+                primaryRow.EmailConfirmed.Should().BeFalse();
+            }
+        }
+
+        // Same rule on the promote branch, and with the address unchanged: clearing the checkbox on an
+        // unrelated profile edit must not leave a confirmed row behind (and must not silently confirm
+        // one either).
+        [Fact]
+        public async Task UpdateUser_EmailUnchangedAndConfirmedCleared_PrimaryRowFollows()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = true;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+                var existingEmail = user.Email;
+
+                var primary = await AddEmailRowAsync(context, user.Id, existingEmail, true, true);
+
+                userDto.Id = user.Id;
+                userDto.Email = existingEmail;
+                userDto.EmailConfirmed = false;
+
+                var (result, _) = await identityService.UpdateUserAsync(userDto);
+                result.Succeeded.Should().BeTrue();
+
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.EmailConfirmed.Should().BeFalse();
+
+                var rows = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).ToListAsync();
+                rows.Should().HaveCount(1);
+                rows.Single().Id.Should().Be(primary.Id);
+                rows.Single().EmailConfirmed.Should().Be(reloadedUser.EmailConfirmed);
+            }
+        }
+
         // At the cap with no primary row, a Users.Email edit cannot be synced to a primary row at
         // all. Reporting success there would leave Users.Email with no matching primary row — the
         // exact drift this feature exists to prevent — so it must surface as an error.
@@ -1053,6 +1237,9 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var identityService = GetIdentityService(context);
 
                 var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                // Explicit: the promoted row mirrors the profile's EmailConfirmed checkbox, which the
+                // fixture randomizes.
+                userDto.EmailConfirmed = true;
                 await identityService.CreateUserAsync(userDto);
                 var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
 
@@ -1319,6 +1506,8 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var newEmail = $"{Guid.NewGuid()}@example.com";
                 var userDtoForUpdate = IdentityDtoMock<string>.GenerateRandomUser(user.Id);
                 userDtoForUpdate.Email = newEmail;
+                // Explicit: the primary row mirrors this checkbox, and the fixture randomizes it.
+                userDtoForUpdate.EmailConfirmed = true;
 
                 await identityService.UpdateUserAsync(userDtoForUpdate);
 
@@ -1521,6 +1710,8 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 
                 var userDtoForUpdate = IdentityDtoMock<string>.GenerateRandomUser(user.Id);
                 userDtoForUpdate.Email = pendingEmail;
+                // Explicit: the promoted row mirrors this checkbox, and the fixture randomizes it.
+                userDtoForUpdate.EmailConfirmed = true;
 
                 var (result, _) = await identityService.UpdateUserAsync(userDtoForUpdate);
 

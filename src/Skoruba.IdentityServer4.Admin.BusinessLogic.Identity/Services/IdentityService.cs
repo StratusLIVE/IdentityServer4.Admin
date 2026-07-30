@@ -654,25 +654,16 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             return null;
         }
 
-        // First-to-confirm semantics: a CONFIRMED row on another account blocks, and so does a
-        // PRIMARY row even when unconfirmed — deleting another account's primary would strand its
-        // Users.Email (the exact drift this feature exists to fix). Only non-primary unconfirmed
-        // cross-account rows are stale claims and are cleared. Also blocks on a confirmed
-        // Users.Email match with no corresponding UserEmailAddresses row (legacy accounts).
+        // First-to-confirm semantics live in the repository
+        // (TryResolveCrossAccountEmailConflictAsync) so the profile-edit path enforces the identical
+        // policy instead of a second copy of it (review round-3). This wrapper only turns the outcome into
+        // a localized error. Returns null when the address is free to use.
         private async Task<IdentityResult> ResolveCrossAccountConflictAsync(string userId, string email)
         {
-            var confirmedOnOtherUser = await IdentityRepository.AnyOtherUserWithConfirmedEmailAsync(email, userId);
-            if (confirmedOnOtherUser)
+            var resolved = await IdentityRepository.TryResolveCrossAccountEmailConflictAsync(userId, email);
+            if (!resolved)
                 return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });
 
-            var allRows = await IdentityRepository.GetUserEmailAddressesByEmailAsync(email);
-            if (allRows.Any(r => r.UserId != userId && (r.EmailConfirmed || r.IsPrimary)))
-                return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });
-
-            foreach (var stale in allRows.Where(r => !r.EmailConfirmed && !r.IsPrimary && r.UserId != userId))
-            {
-                await IdentityRepository.DeleteUserEmailAddressAsync(stale.Id);
-            }
             return null;
         }
     }

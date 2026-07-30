@@ -113,6 +113,8 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var identityService = GetIdentityService(context);
 
                 var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                // Explicit: the promoted row mirrors this checkbox, and the fixture randomizes it.
+                userDto.EmailConfirmed = true;
                 await identityService.CreateUserAsync(userDto);
                 var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
                 userId = user.Id;
@@ -137,6 +139,144 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
 
                 var reloadedUser = await verifyContext.Users.SingleAsync(x => x.Id == userId);
                 reloadedUser.Email.Should().Be(pendingEmail);
+            }
+        }
+
+        // Round-3 critical, relational variant: the profile path must DELETE another account's stale
+        // unconfirmed non-primary claim, not merely allow the edit. Verified on a fresh context so it
+        // proves committed state — the exact table shape IdentityServer's SingleOrDefault readers see.
+        [Fact]
+        public async Task UpdateUserAsync_StaleCrossAccountPendingRow_IsDeletedAndOnlyOneRowRemains()
+        {
+            string userId;
+            string staleRowId;
+            var sharedEmail = "pending@example.com";
+
+            using (var context = new AdminIdentityDbContext(_options))
+            {
+                context.Database.IsRelational().Should().BeTrue("the committed-state assertions below are weaker on a non-relational provider");
+
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = true;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
+                userId = user.Id;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.SingleAsync(x => x.UserName == otherUserDto.UserName);
+
+                var staleRow = await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, false);
+                staleRowId = staleRow.Id;
+
+                userDto.Id = userId;
+                userDto.Email = sharedEmail;
+
+                var (result, _) = await identityService.UpdateUserAsync(userDto);
+                result.Succeeded.Should().BeTrue();
+            }
+
+            using (var verifyContext = new AdminIdentityDbContext(_options))
+            {
+                (await verifyContext.Set<UserEmailAddress>().SingleOrDefaultAsync(x => x.Id == staleRowId))
+                    .Should().BeNull("the delete must be committed, not just tracked");
+
+                var rowsForAddress = await verifyContext.Set<UserEmailAddress>()
+                    .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
+                rowsForAddress.Should().HaveCount(1, "two rows for one address break EmailAddressManager.GetEmailAsync");
+                rowsForAddress.Single().UserId.Should().Be(userId);
+                rowsForAddress.Single().IsPrimary.Should().BeTrue();
+
+                var reloadedUser = await verifyContext.Users.SingleAsync(x => x.Id == userId);
+                reloadedUser.Email.Should().Be(sharedEmail);
+            }
+        }
+
+        // The blocking half under a real transaction: nothing is written and nothing is deleted.
+        [Fact]
+        public async Task UpdateUserAsync_ConfirmedRowOnOtherAccount_RollsBackAndKeepsBothRows()
+        {
+            string userId;
+            string originalEmail;
+            string otherRowId;
+            var sharedEmail = "owned@example.com";
+
+            using (var context = new AdminIdentityDbContext(_options))
+            {
+                context.Database.IsRelational().Should().BeTrue("the rollback assertion below is vacuous on a non-relational provider");
+
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
+                userId = user.Id;
+                originalEmail = user.Email;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.SingleAsync(x => x.UserName == otherUserDto.UserName);
+
+                var otherRow = await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, true);
+                otherRowId = otherRow.Id;
+
+                userDto.Id = userId;
+                userDto.Email = sharedEmail;
+
+                Func<Task> act = () => identityService.UpdateUserAsync(userDto);
+                await act.Should().ThrowAsync<UserFriendlyViewException>();
+            }
+
+            using (var verifyContext = new AdminIdentityDbContext(_options))
+            {
+                (await verifyContext.Set<UserEmailAddress>().SingleOrDefaultAsync(x => x.Id == otherRowId)).Should().NotBeNull();
+
+                var reloadedUser = await verifyContext.Users.SingleAsync(x => x.Id == userId);
+                reloadedUser.Email.Should().Be(originalEmail);
+                (await verifyContext.Set<UserEmailAddress>().Where(x => x.UserId == userId).CountAsync()).Should().Be(0);
+            }
+        }
+
+        // Round-3 important, relational variant: Users.EmailConfirmed and the primary row are written
+        // in one transaction and must agree. Explicit false checkbox, never the randomized fixture.
+        [Fact]
+        public async Task UpdateUserAsync_EmailConfirmedFalse_BothStoresAgree()
+        {
+            string userId;
+            var newEmail = "needs-verification@example.com";
+
+            using (var context = new AdminIdentityDbContext(_options))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = true;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
+                userId = user.Id;
+
+                userDto.Id = userId;
+                userDto.Email = newEmail;
+                userDto.EmailConfirmed = false;
+
+                var (result, _) = await identityService.UpdateUserAsync(userDto);
+                result.Succeeded.Should().BeTrue();
+            }
+
+            using (var verifyContext = new AdminIdentityDbContext(_options))
+            {
+                var reloadedUser = await verifyContext.Users.SingleAsync(x => x.Id == userId);
+                reloadedUser.Email.Should().Be(newEmail);
+                reloadedUser.EmailConfirmed.Should().BeFalse();
+
+                var rows = await verifyContext.Set<UserEmailAddress>().Where(x => x.UserId == userId).ToListAsync();
+                rows.Should().HaveCount(1);
+                rows.Single().IsPrimary.Should().BeTrue();
+                rows.Single().Email.Should().Be(newEmail);
+                rows.Single().EmailConfirmed.Should().Be(reloadedUser.EmailConfirmed);
+                rows.Single().EmailConfirmed.Should().BeFalse();
             }
         }
 

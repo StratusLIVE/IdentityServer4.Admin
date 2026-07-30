@@ -218,11 +218,15 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                     var normalized = UserManager.NormalizeEmail(user.Email);
                     if (!string.Equals(normalized, userIdentity.NormalizedEmail, StringComparison.Ordinal))
                     {
-                        // Identity's unique-email validation only sees Users.Email; confirmed or
-                        // primary custom rows on other accounts must also block the change.
-                        var rows = await GetUserEmailAddressesByEmailAsync(user.Email);
-                        var userId = user.Id.ToString();
-                        if (rows.Any(r => r.UserId != userId && (r.EmailConfirmed || r.IsPrimary)))
+                        // Identity's unique-email validation only sees Users.Email, and blocking alone
+                        // isn't enough: an unconfirmed non-primary row left on another account plus the
+                        // confirmed primary row the sync below creates would be two rows for one address,
+                        // which throws in IdentityServer's SingleOrDefault readers (review round-3). Run the
+                        // full first-to-confirm policy — block or clear — before touching either store.
+                        //
+                        // Gated on the address actually changing so an unrelated profile save is never
+                        // rejected by pre-existing dirty data.
+                        if (!await TryResolveCrossAccountEmailConflictAsync(user.Id.ToString(), user.Email))
                             return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
                     }
                 }
@@ -469,6 +473,35 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             return UserManager.Users.AnyAsync(u => u.NormalizedEmail == normalized && u.EmailConfirmed && !u.Id.Equals(id));
         }
 
+        // First-to-confirm, shared by the profile-edit path (UpdateUserAsync) and the
+        // address-management paths (IdentityService.ResolveCrossAccountConflictAsync) so the policy
+        // exists in exactly one place. Returns false when the address is already claimed by another
+        // account: a CONFIRMED row blocks, and so does a PRIMARY row even when unconfirmed —
+        // deleting another account's primary would strand its Users.Email, the exact drift this
+        // feature exists to fix. A confirmed Users.Email match with no row at all (legacy accounts)
+        // blocks too. Otherwise the other accounts' unconfirmed non-primary rows are stale claims
+        // and are deleted, so only the caller's row survives for this address.
+        //
+        // Callers must run this inside their own transaction (ExecuteInTransactionAsync) so the
+        // deletes roll back with the rest of the write.
+        public virtual async Task<bool> TryResolveCrossAccountEmailConflictAsync(string userId, string email)
+        {
+            var confirmedOnOtherUser = await AnyOtherUserWithConfirmedEmailAsync(email, userId);
+            if (confirmedOnOtherUser) return false;
+
+            var allRows = await GetUserEmailAddressesByEmailAsync(email);
+            if (allRows.Any(r => r.UserId != userId && (r.EmailConfirmed || r.IsPrimary))) return false;
+
+            var stale = allRows.Where(r => r.UserId != userId && !r.EmailConfirmed && !r.IsPrimary).ToList();
+            if (stale.Count > 0)
+            {
+                UserEmailAddresses.RemoveRange(stale);
+                await AutoSaveChangesAsync();
+            }
+
+            return true;
+        }
+
         public virtual Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress)
         {
             return ExecuteInTransactionAsync(() => AddUserEmailAddressCoreAsync(emailAddress));
@@ -569,6 +602,9 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
 
         // Materializes a primary row from Users.Email for legacy accounts that predate the
         // UserEmailAddresses table (no-op when a primary row already exists or the user has no email).
+        // The bootstrapped row inherits the account's real Users.EmailConfirmed rather than claiming
+        // the address is verified; an unconfirmed primary row is still un-stealable because
+        // TryResolveCrossAccountEmailConflictAsync blocks on IsPrimary.
         public virtual async Task<IdentityResult> EnsurePrimaryEmailRowAsync(string userId)
         {
             var user = await UserManager.FindByIdAsync(userId);
@@ -584,6 +620,14 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         // branch could otherwise produce two rows with the same Email on one user, which throws in
         // IdentityServer's EmailAddressManager.GetEmailAsync (SingleOrDefault on a non-unique column)
         // on the login-by-email path.
+        //
+        // Confirmation rule (review round-3): the primary row MIRRORS Users.EmailConfirmed, which the
+        // caller has already persisted from the profile's explicit checkbox. Forcing the row to true
+        // let the two stores disagree — a profile saved with the box clear produced
+        // Users.EmailConfirmed=false alongside a confirmed row, and an unrelated edit silently
+        // confirmed the row. Mirroring keeps the pair in agreement and leaves staff able to clear
+        // the box to force re-verification. The opposite direction (SyncUserPrimaryEmailAsync, the
+        // address-management paths) sets BOTH to true, so that pair agrees as well.
         protected virtual async Task<IdentityResult> SyncPrimaryEmailRowAsync(TUser user)
         {
             if (string.IsNullOrEmpty(user.Email)) return IdentityResult.Success;
@@ -601,7 +645,7 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                 foreach (var row in rows.Where(r => r.IsPrimary && r.Id != match.Id)) row.IsPrimary = false;
                 match.Email = user.Email;          // adopt the casing staff just entered
                 match.NormalizedEmail = normalized;
-                match.EmailConfirmed = true;
+                match.EmailConfirmed = user.EmailConfirmed;
                 match.IsPrimary = true;
                 await AutoSaveChangesAsync();
                 return IdentityResult.Success;
@@ -612,7 +656,7 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             {
                 primary.Email = user.Email;
                 primary.NormalizedEmail = normalized;
-                primary.EmailConfirmed = true;
+                primary.EmailConfirmed = user.EmailConfirmed;
                 await AutoSaveChangesAsync();
                 return IdentityResult.Success;
             }
@@ -630,7 +674,7 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                 UserId = userId,
                 Email = user.Email,
                 NormalizedEmail = normalized,
-                EmailConfirmed = true,
+                EmailConfirmed = user.EmailConfirmed,
                 IsPrimary = true
             });
             await AutoSaveChangesAsync();
