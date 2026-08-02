@@ -1812,7 +1812,9 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 userDto.PhoneNumber = "555-0100";
 
                 Func<Task> act = () => identityService.UpdateUserAsync(userDto);
-                await act.Should().ThrowAsync<UserFriendlyViewException>();
+                // The rejection must name the conflicting address, not just fail.
+                (await act.Should().ThrowAsync<UserFriendlyViewException>())
+                    .Which.ErrorMessages.Should().Contain(m => m.ErrorMessage.Contains(sharedEmail));
 
                 var rowsForAddress = await context.Set<UserEmailAddress>()
                     .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
@@ -1847,7 +1849,9 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var result = await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = user.Id, Email = "unrelated@example.com" });
 
                 result.Succeeded.Should().BeFalse();
-                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+                // The message must name the conflicting address — the bootstrapped login email, not the
+                // address staff actually typed.
+                result.Errors.Should().Contain(e => e.Description.Contains(sharedEmail));
 
                 var rowsForAddress = await context.Set<UserEmailAddress>()
                     .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
@@ -1963,7 +1967,9 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 userDto.PhoneNumber = "555-0100";
 
                 Func<Task> act = () => identityService.UpdateUserAsync(userDto);
-                await act.Should().ThrowAsync<UserFriendlyViewException>();
+                // The rejection must name the conflicting address, not just fail.
+                (await act.Should().ThrowAsync<UserFriendlyViewException>())
+                    .Which.ErrorMessages.Should().Contain(m => m.ErrorMessage.Contains(sharedEmail));
 
                 var rowsForAddress = await context.Set<UserEmailAddress>()
                     .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
@@ -1973,6 +1979,103 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 (await context.Set<UserEmailAddress>().Where(x => x.Id == driftedRow.Id).SingleOrDefaultAsync())
                     .Email.Should().Be("drifted@example.com");
             }
+        }
+
+        // Round-4 critical, same-user duplicates: [EmailAddress] accepts surrounding whitespace and the
+        // profile path never trimmed, so saving "X " while the user already held a row for X missed the
+        // match lookup (normalized "X " != "X") and rewrote "X " into the primary row — two rows for one
+        // address under SQL Server's trailing-space-insensitive comparison.
+        [Fact]
+        public async Task UpdateUser_EmailWithTrailingWhitespaceMatchingAnExistingRow_KeepsOneTrimmedRow()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = true;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var secondaryEmail = "secondary-x@example.com";
+                await AddEmailRowAsync(context, user.Id, "primary-y@example.com", true, true);
+                await AddEmailRowAsync(context, user.Id, secondaryEmail, false, true);
+
+                // Staff retypes the secondary address into the profile field with a stray trailing space.
+                userDto.Id = user.Id;
+                userDto.Email = secondaryEmail + " ";
+
+                var (result, _) = await identityService.UpdateUserAsync(userDto);
+                result.Succeeded.Should().BeTrue();
+
+                var rows = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).ToListAsync();
+                rows.Where(r => string.Equals(r.Email.Trim(), secondaryEmail, StringComparison.OrdinalIgnoreCase))
+                    .Should().HaveCount(1, "two rows for one address break EmailAddressManager.GetEmailAsync");
+                rows.Should().OnlyContain(r => r.Email == r.Email.Trim(), "an untrimmed row silently coexists with its trimmed twin");
+                rows.Single(r => r.IsPrimary).NormalizedEmail.Should().Be(secondaryEmail.ToUpperInvariant());
+
+                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
+                reloadedUser.Email.Should().Be(secondaryEmail);
+            }
+        }
+
+        // Round-4 critical, same-user duplicates: a legacy row whose NormalizedEmail was wrongly
+        // lowercased is populated, so the old null-only fallback skipped it — the unrelated save then
+        // inserted a SECOND row for the address the user already held.
+        [Fact]
+        public async Task UpdateUser_UnrelatedSaveWithMisNormalizedOwnRow_HealsTheRowInsteadOfInsertingASecond()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = false;
+                userDto.Email = "shared@example.com";
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                // Legacy data: the row's Email is the same address in different casing, but its
+                // NormalizedEmail was lowercased instead of upper-cased.
+                var legacyRow = await AddEmailRowAsync(context, user.Id, "Shared@Example.com", false, false);
+                legacyRow.NormalizedEmail = "shared@example.com";
+                await context.SaveChangesAsync();
+
+                // Unrelated save: the email field is untouched.
+                userDto.Id = user.Id;
+                userDto.PhoneNumber = "555-0100";
+
+                var (result, _) = await identityService.UpdateUserAsync(userDto);
+                result.Succeeded.Should().BeTrue();
+
+                var rows = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).ToListAsync();
+                rows.Should().HaveCount(1, "the mis-normalized row must be healed, not duplicated");
+                rows.Single().NormalizedEmail.Should().Be("SHARED@EXAMPLE.COM");
+                rows.Single().IsPrimary.Should().BeTrue();
+            }
+        }
+
+        // A failed delete must not audit a deletion that did not happen: the user and its email rows
+        // roll back together, so the event would describe a user that still exists.
+        [Fact]
+        public async Task DeleteUser_WhenDeleteFails_LogsNoDeletedEvent()
+        {
+            var auditMock = new Mock<IAuditEventLogger>();
+            var repositoryMock = new Mock<IIdentityRepository<UserIdentity, UserIdentityRole, string,
+                UserIdentityUserClaim, UserIdentityUserRole, UserIdentityUserLogin, UserIdentityRoleClaim,
+                UserIdentityUserToken>>();
+            repositoryMock.Setup(x => x.DeleteUserAsync(It.IsAny<string>()))
+                .ReturnsAsync(IdentityResult.Failed(new IdentityError { Description = "Delete failed." }));
+
+            var identityService = GetIdentityService(repositoryMock.Object, new IdentityServiceResources(), GetMapper(), auditMock.Object);
+
+            var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+            userDto.Id = Guid.NewGuid().ToString();
+
+            Func<Task> act = () => identityService.DeleteUserAsync(userDto.Id, userDto);
+            await act.Should().ThrowAsync<UserFriendlyViewException>();
+
+            auditMock.Verify(x => x.LogEventAsync(It.IsAny<UserDeletedEvent<UserDto<string>>>()), Times.Never);
         }
     }
 }

@@ -240,9 +240,13 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
         {
             var identityResult = await IdentityRepository.DeleteUserAsync(userId);
 
+            // Check first, audit second (as every sibling does): a failed delete rolls the user and its
+            // email rows back together, so auditing before the check records a deletion that never happened.
+            var handleIdentityError = HandleIdentityError(identityResult, IdentityServiceResources.UserDeleteFailed().Description, IdentityServiceResources.IdentityErrorKey().Description, user);
+
             await AuditEventLogger.LogEventAsync(new UserDeletedEvent<TUserDto>(user));
 
-            return HandleIdentityError(identityResult, IdentityServiceResources.UserDeleteFailed().Description, IdentityServiceResources.IdentityErrorKey().Description, user);
+            return handleIdentityError;
         }
 
         public virtual async Task<IdentityResult> CreateUserRoleAsync(TUserRolesDto role)

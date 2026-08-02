@@ -319,7 +319,9 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 userDto.PhoneNumber = "555-0100";
 
                 Func<Task> act = () => identityService.UpdateUserAsync(userDto);
-                await act.Should().ThrowAsync<UserFriendlyViewException>();
+                // The rejection must name the conflicting address, not just fail.
+                (await act.Should().ThrowAsync<UserFriendlyViewException>())
+                    .Which.ErrorMessages.Should().Contain(m => m.ErrorMessage.Contains(sharedEmail));
             }
 
             // Fresh context: EF does not revert the change tracker on rollback.
@@ -369,7 +371,9 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var result = await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = userId, Email = addedEmail });
 
                 result.Succeeded.Should().BeFalse();
-                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+                // The message must name the conflicting address — the login email that was bootstrapped,
+                // not the address staff actually typed.
+                result.Errors.Should().Contain(e => e.Description.Contains(sharedEmail));
             }
 
             using (var verifyContext = new AdminIdentityDbContext(_options))

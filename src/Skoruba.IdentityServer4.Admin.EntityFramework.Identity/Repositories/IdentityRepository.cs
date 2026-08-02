@@ -200,6 +200,12 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         /// <returns>This method returns identity result and new user id</returns>
         public virtual async Task<(IdentityResult identityResult, TKey userId)> CreateUserAsync(TUser user)
         {
+            // [EmailAddress] accepts surrounding whitespace and SQL Server compares strings
+            // trailing-space-insensitively, so an untrimmed address silently coexists with its trimmed
+            // twin — two rows for one address. The service layer already trims; do it here too so every
+            // write path is covered.
+            user.Email = user.Email?.Trim();
+
             var identityResult = await UserManager.CreateAsync(user);
 
             return (identityResult, user.Id);
@@ -207,6 +213,11 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
 
         public virtual async Task<(IdentityResult identityResult, TKey userId)> UpdateUserAsync(TUser user)
         {
+            // See CreateUserAsync: an untrimmed address is a same-address duplicate waiting to happen,
+            // because the match lookup below normalizes exactly while SQL Server's = ignores trailing
+            // spaces. Trim before anything reads user.Email.
+            user.Email = user.Email?.Trim();
+
             // Ownership check + Users update + primary-row sync in ONE transaction so a sync
             // failure can't leave Users.Email diverged from the primary row (review #3/#5).
             var identityResult = await ExecuteInTransactionAsync(async () =>
@@ -226,6 +237,10 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                         //
                         // Gated on the address actually changing so an unrelated profile save is never
                         // rejected by pre-existing dirty data.
+                        //
+                        // Not redundant with the same call at the choke point in SyncPrimaryEmailRowAsync:
+                        // that one is the enforcement that cannot be bypassed, this one is the earlier,
+                        // better-worded rejection for the case staff actually typed a new address. Keep both.
                         if (!await TryResolveCrossAccountEmailConflictAsync(user.Id.ToString(), user.Email))
                             return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
                     }
@@ -660,12 +675,19 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             var normalized = UserManager.NormalizeEmail(user.Email);
             var rows = await UserEmailAddresses.Where(e => e.UserId == userId).ToListAsync();
 
-            // Legacy rows may have a null NormalizedEmail, so fall back to the raw address.
+            // Kept at least as wide as GetUserEmailAddressesByEmailAsync's conflict lookup: anything that
+            // lookup would treat as the same address must match here, or the branches below materialize a
+            // second row for it. Legacy rows may have a null NormalizedEmail OR a wrongly-cased one
+            // (lowercased by old code), so the raw-Email fallback is unconditional rather than gated on
+            // null — a populated-but-wrong NormalizedEmail must still match.
             var match = rows.FirstOrDefault(e => e.NormalizedEmail == normalized
-                || (e.NormalizedEmail == null && string.Equals(e.Email, user.Email, StringComparison.OrdinalIgnoreCase)));
+                || string.Equals(e.Email, user.Email, StringComparison.OrdinalIgnoreCase));
 
             if (match != null)
             {
+                // No cross-account policy here on purpose: the user ALREADY holds a row for this
+                // address, so promoting it creates no new claim and cannot increase the row count for
+                // the address. The writes below also heal a bad NormalizedEmail on that row.
                 foreach (var row in rows.Where(r => r.IsPrimary && r.Id != match.Id)) row.IsPrimary = false;
                 match.Email = user.Email;          // adopt the casing staff just entered
                 match.NormalizedEmail = normalized;
