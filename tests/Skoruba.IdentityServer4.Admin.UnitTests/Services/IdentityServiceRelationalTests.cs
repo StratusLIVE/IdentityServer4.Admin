@@ -280,6 +280,112 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             }
         }
 
+        // Round-4 critical, route 1: an unrelated profile save on a legacy account (email field
+        // untouched, no rows yet) reached SyncPrimaryEmailRowAsync's insert branch with no conflict
+        // policy run. Relationally we can also prove the whole save is rolled back, not just refused.
+        [Fact]
+        public async Task UpdateUserAsync_UnrelatedSaveOnLegacyUserWhoseLoginEmailIsConfirmedElsewhere_RollsBack()
+        {
+            string userId;
+            string otherUserId;
+            string originalPhoneNumber;
+            string sharedEmail;
+
+            using (var context = new AdminIdentityDbContext(_options))
+            {
+                context.Database.IsRelational().Should().BeTrue("the rollback assertion below is vacuous on a non-relational provider");
+
+                var identityService = GetIdentityService(context);
+
+                // A is legacy: Users.Email set and unconfirmed, zero rows. Explicit flag, the fixture
+                // randomizes it.
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = false;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
+                userId = user.Id;
+                sharedEmail = user.Email;
+                originalPhoneNumber = user.PhoneNumber;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.SingleAsync(x => x.UserName == otherUserDto.UserName);
+                otherUserId = otherUser.Id;
+                (await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = otherUserId, Email = sharedEmail })).Succeeded.Should().BeTrue();
+
+                // Unrelated save: only the phone changes, so UpdateUserAsync's changed-address guard
+                // is skipped and the choke-point guard is the only thing standing in the way.
+                userDto.Id = userId;
+                userDto.PhoneNumber = "555-0100";
+
+                Func<Task> act = () => identityService.UpdateUserAsync(userDto);
+                await act.Should().ThrowAsync<UserFriendlyViewException>();
+            }
+
+            // Fresh context: EF does not revert the change tracker on rollback.
+            using (var verifyContext = new AdminIdentityDbContext(_options))
+            {
+                var reloadedUser = await verifyContext.Users.SingleAsync(x => x.Id == userId);
+                reloadedUser.PhoneNumber.Should().Be(originalPhoneNumber, "the refused primary-row sync must roll the whole profile save back");
+
+                var rowsForAddress = await verifyContext.Set<UserEmailAddress>()
+                    .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
+                rowsForAddress.Should().HaveCount(1, "two rows for one address break EmailAddressManager.GetEmailAsync");
+                rowsForAddress.Single().UserId.Should().Be(otherUserId);
+                (await verifyContext.Set<UserEmailAddress>().Where(x => x.UserId == userId).CountAsync()).Should().Be(0);
+            }
+        }
+
+        // Round-4 critical, route 2: the legacy bootstrap inside CreateUserEmailAddressAsync runs
+        // before any conflict check, so adding an unrelated address materialized a row for the login
+        // email without ever checking it.
+        [Fact]
+        public async Task CreateUserEmailAddressAsync_LegacyBootstrapOfEmailConfirmedElsewhere_RollsBack()
+        {
+            string userId;
+            string otherUserId;
+            string sharedEmail;
+            var addedEmail = "unrelated@example.com";
+
+            using (var context = new AdminIdentityDbContext(_options))
+            {
+                context.Database.IsRelational().Should().BeTrue("the rollback assertion below is vacuous on a non-relational provider");
+
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = false;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
+                userId = user.Id;
+                sharedEmail = user.Email;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.SingleAsync(x => x.UserName == otherUserDto.UserName);
+                otherUserId = otherUser.Id;
+                (await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = otherUserId, Email = sharedEmail })).Succeeded.Should().BeTrue();
+
+                var result = await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = userId, Email = addedEmail });
+
+                result.Succeeded.Should().BeFalse();
+                result.Errors.Should().Contain(e => e.Description.Contains("already associated"));
+            }
+
+            using (var verifyContext = new AdminIdentityDbContext(_options))
+            {
+                (await verifyContext.Set<UserEmailAddress>().Where(x => x.UserId == userId).CountAsync())
+                    .Should().Be(0, "the refused bootstrap must leave the legacy account with no rows at all");
+
+                var rowsForAddress = await verifyContext.Set<UserEmailAddress>()
+                    .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
+                rowsForAddress.Should().HaveCount(1);
+                rowsForAddress.Single().UserId.Should().Be(otherUserId);
+
+                (await verifyContext.Set<UserEmailAddress>().Where(x => x.NormalizedEmail == addedEmail.ToUpperInvariant()).CountAsync()).Should().Be(0);
+            }
+        }
+
         private static async Task<UserEmailAddress> AddEmailRowAsync(AdminIdentityDbContext context, string userId, string email, bool isPrimary, bool confirmed)
         {
             var row = new UserEmailAddress

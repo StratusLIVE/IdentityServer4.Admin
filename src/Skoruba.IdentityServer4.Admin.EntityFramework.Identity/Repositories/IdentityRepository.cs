@@ -605,6 +605,9 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         // The bootstrapped row inherits the account's real Users.EmailConfirmed rather than claiming
         // the address is verified; an unconfirmed primary row is still un-stealable because
         // TryResolveCrossAccountEmailConflictAsync blocks on IsPrimary.
+        //
+        // Callers must hold a transaction: the sync below runs the cross-account policy, which deletes
+        // other accounts' stale rows, and those deletes must roll back with the rest of the write.
         public virtual async Task<IdentityResult> EnsurePrimaryEmailRowAsync(string userId)
         {
             var user = await UserManager.FindByIdAsync(userId);
@@ -628,6 +631,11 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         // confirmed the row. Mirroring keeps the pair in agreement and leaves staff able to clear
         // the box to force re-verification. The opposite direction (SyncUserPrimaryEmailAsync, the
         // address-management paths) sets BOTH to true, so that pair agrees as well.
+        //
+        // Cross-account choke point (review round-4): when no own-row matches, this is the ONLY place a
+        // row is ever created for the address, so the first-to-confirm policy runs here rather than
+        // being trusted to every caller. Both callers could otherwise skip it — UpdateUserAsync's
+        // guard only fires when the address changed, and the legacy bootstrap never checks at all.
         protected virtual async Task<IdentityResult> SyncPrimaryEmailRowAsync(TUser user)
         {
             if (string.IsNullOrEmpty(user.Email)) return IdentityResult.Success;
@@ -650,6 +658,15 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                 await AutoSaveChangesAsync();
                 return IdentityResult.Success;
             }
+
+            // Both remaining branches materialize a NEW claim on user.Email — rewriting the primary
+            // row or inserting one. Neither caller is guaranteed to have run the policy (the
+            // profile-edit guard is gated on the address changing, and the legacy bootstrap never
+            // checks the legacy address at all), so enforce it here, at the only place rows are
+            // created for this address. Fails loudly rather than skipping: skipping would leave the
+            // Users.Email/primary-row drift this sync exists to prevent.
+            if (!await TryResolveCrossAccountEmailConflictAsync(userId, user.Email))
+                return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
 
             var primary = rows.FirstOrDefault(e => e.IsPrimary);
             if (primary != null)
