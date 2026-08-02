@@ -386,6 +386,54 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             }
         }
 
+        // Round-4: relational variant of the orphan-row case. Verified on a fresh context so it proves
+        // the row deletes committed alongside the user delete rather than merely being tracked.
+        [Fact]
+        public async Task DeleteUserAsync_RemovesOwnEmailAddressRows_AndLeavesOtherUsersRowsIntact()
+        {
+            string userId;
+            string otherUserId;
+            string survivorRowId;
+
+            using (var context = new AdminIdentityDbContext(_options))
+            {
+                context.Database.IsRelational().Should().BeTrue("the committed-state assertions below are weaker on a non-relational provider");
+
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
+                userId = user.Id;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.SingleAsync(x => x.UserName == otherUserDto.UserName);
+                otherUserId = otherUser.Id;
+
+                await AddEmailRowAsync(context, userId, "doomed-primary@example.com", true, true);
+                await AddEmailRowAsync(context, userId, "doomed-secondary@example.com", false, true);
+                var survivorRow = await AddEmailRowAsync(context, otherUserId, "survivor@example.com", false, true);
+                survivorRowId = survivorRow.Id;
+
+                userDto.Id = userId;
+                var result = await identityService.DeleteUserAsync(userId, userDto);
+                result.Succeeded.Should().BeTrue();
+            }
+
+            using (var verifyContext = new AdminIdentityDbContext(_options))
+            {
+                (await verifyContext.Users.SingleOrDefaultAsync(x => x.Id == userId)).Should().BeNull();
+
+                (await verifyContext.Set<UserEmailAddress>().Where(x => x.UserId == userId).CountAsync())
+                    .Should().Be(0, "orphaned rows keep blocking their addresses after the user is gone");
+
+                var survivor = await verifyContext.Set<UserEmailAddress>().SingleOrDefaultAsync(x => x.Id == survivorRowId);
+                survivor.Should().NotBeNull();
+                survivor.UserId.Should().Be(otherUserId);
+            }
+        }
+
         private static async Task<UserEmailAddress> AddEmailRowAsync(AdminIdentityDbContext context, string userId, string email, bool isPrimary, bool confirmed)
         {
             var row = new UserEmailAddress

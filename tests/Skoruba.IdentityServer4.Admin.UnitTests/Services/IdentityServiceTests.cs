@@ -467,6 +467,40 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             }
         }
 
+        // The platform table has no FK to Users, so nothing cascades: an orphaned confirmed row
+        // would block that address for every other account forever.
+        [Fact]
+        public async Task DeleteUser_RemovesOwnEmailAddressRows_AndLeavesOtherUsersRowsIntact()
+        {
+            using (var context = new AdminIdentityDbContext(_dbContextOptions))
+            {
+                var identityService = GetIdentityService(context);
+
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.Where(x => x.UserName == userDto.UserName).SingleOrDefaultAsync();
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.Where(x => x.UserName == otherUserDto.UserName).SingleOrDefaultAsync();
+
+                await AddEmailRowAsync(context, user.Id, "doomed-primary@example.com", true, true);
+                await AddEmailRowAsync(context, user.Id, "doomed-secondary@example.com", false, true);
+                var survivorRow = await AddEmailRowAsync(context, otherUser.Id, "survivor@example.com", false, true);
+
+                var deletedUserDto = await identityService.GetUserAsync(user.Id);
+                var result = await identityService.DeleteUserAsync(user.Id, deletedUserDto);
+
+                result.Succeeded.Should().BeTrue();
+                (await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).CountAsync())
+                    .Should().Be(0, "orphaned rows keep blocking their addresses after the user is gone");
+
+                var survivor = await context.Set<UserEmailAddress>().Where(x => x.Id == survivorRow.Id).SingleOrDefaultAsync();
+                survivor.Should().NotBeNull();
+                survivor.UserId.Should().Be(otherUser.Id);
+            }
+        }
+
         [Fact]
         public async Task AddRoleAsync()
         {
