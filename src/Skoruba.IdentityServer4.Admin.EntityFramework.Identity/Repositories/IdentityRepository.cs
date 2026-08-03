@@ -238,9 +238,10 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
                         // Gated on the address actually changing so an unrelated profile save is never
                         // rejected by pre-existing dirty data.
                         //
-                        // Not redundant with the same call at the choke point in SyncPrimaryEmailRowAsync:
-                        // that one is the enforcement that cannot be bypassed, this one is the earlier,
-                        // better-worded rejection for the case staff actually typed a new address. Keep both.
+                        // Not redundant with the choke point in SyncPrimaryEmailRowAsync: that one is
+                        // block-only enforcement that cannot be bypassed, while this call is the ONLY
+                        // place on the profile path that may CLEAR another account's stale claim —
+                        // deliberately gated on staff having typed the address (review round-5). Keep both.
                         if (!await TryResolveCrossAccountEmailConflictAsync(user.Id.ToString(), user.Email))
                             return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
                     }
@@ -533,6 +534,19 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             return true;
         }
 
+        // Block-only companion to TryResolveCrossAccountEmailConflictAsync, for callers that did NOT
+        // get the address typed at them (review round-5). It must be STRICTER than the resolve: any
+        // other account's row blocks — including the stale unconfirmed non-primary ones the resolve
+        // would delete — because without the delete, materializing a row alongside one is the
+        // two-rows-per-address state that breaks IdentityServer's SingleOrDefault readers.
+        protected virtual async Task<bool> IsEmailClaimedByAnotherUserAsync(string userId, string email)
+        {
+            if (await AnyOtherUserWithConfirmedEmailAsync(email, userId)) return true;
+
+            var allRows = await GetUserEmailAddressesByEmailAsync(email);
+            return allRows.Any(r => r.UserId != userId);
+        }
+
         public virtual Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress)
         {
             return ExecuteInTransactionAsync(() => AddUserEmailAddressCoreAsync(emailAddress));
@@ -637,8 +651,8 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         // the address is verified; an unconfirmed primary row is still un-stealable because
         // TryResolveCrossAccountEmailConflictAsync blocks on IsPrimary.
         //
-        // Callers must hold a transaction: the sync below runs the cross-account policy, which deletes
-        // other accounts' stale rows, and those deletes must roll back with the rest of the write.
+        // Callers must hold a transaction: the sync below writes the bootstrapped row, and that write
+        // must roll back with the rest of the caller's operation when a later step fails.
         public virtual async Task<IdentityResult> EnsurePrimaryEmailRowAsync(string userId)
         {
             var user = await UserManager.FindByIdAsync(userId);
@@ -664,9 +678,10 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         // address-management paths) sets BOTH to true, so that pair agrees as well.
         //
         // Cross-account choke point (review round-4): when no own-row matches, this is the ONLY place a
-        // row is ever created for the address, so the first-to-confirm policy runs here rather than
-        // being trusted to every caller. Both callers could otherwise skip it — UpdateUserAsync's
-        // guard only fires when the address changed, and the legacy bootstrap never checks at all.
+        // row is ever created for the address, so enforcement runs here rather than being trusted to
+        // every caller. Both callers could otherwise skip it — UpdateUserAsync's guard only fires when
+        // the address changed, and the legacy bootstrap never checks at all. The enforcement is
+        // BLOCK-ONLY (review round-5); clearing stale claims stays on the typed-address paths.
         protected virtual async Task<IdentityResult> SyncPrimaryEmailRowAsync(TUser user)
         {
             if (string.IsNullOrEmpty(user.Email)) return IdentityResult.Success;
@@ -703,7 +718,17 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
             // checks the legacy address at all), so enforce it here, at the only place rows are
             // created for this address. Fails loudly rather than skipping: skipping would leave the
             // Users.Email/primary-row drift this sync exists to prevent.
-            if (!await TryResolveCrossAccountEmailConflictAsync(userId, user.Email))
+            //
+            // BLOCK-ONLY on purpose (review round-5): this runs on every UpdateUserAsync, so running
+            // the delete half of the policy here let a phone-number-only save silently destroy another
+            // account's pending claim — and the unconfirmed primary row materialized for this user then
+            // blocked that account permanently (primary is un-stealable). Clearing stale claims is
+            // reserved for the paths where staff deliberately typed the address: UpdateUserAsync's
+            // changed-address guard and the address-management paths, which run
+            // TryResolveCrossAccountEmailConflictAsync earlier in the same transaction — so by the
+            // time control reaches here on those paths, the stale rows are already gone and this
+            // stricter check passes.
+            if (await IsEmailClaimedByAnotherUserAsync(userId, user.Email))
                 return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
 
             var primary = rows.FirstOrDefault(e => e.IsPrimary);

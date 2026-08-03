@@ -338,6 +338,67 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             }
         }
 
+        // Round-5 medium, relational variant: the choke point is block-only, so an unrelated save on a
+        // legacy account whose login email is stale-claimed elsewhere fails, rolls the whole profile
+        // save back, and leaves the other account's pending claim committed and intact.
+        [Fact]
+        public async Task UpdateUserAsync_UnrelatedSaveOnLegacyUserWithStaleCrossAccountRow_RollsBackAndKeepsClaim()
+        {
+            string userId;
+            string otherUserId;
+            string staleRowId;
+            string originalPhoneNumber;
+            string sharedEmail;
+
+            using (var context = new AdminIdentityDbContext(_options))
+            {
+                context.Database.IsRelational().Should().BeTrue("the rollback assertion below is vacuous on a non-relational provider");
+
+                var identityService = GetIdentityService(context);
+
+                // A is legacy: Users.Email set and unconfirmed, zero rows.
+                var userDto = IdentityDtoMock<string>.GenerateRandomUser();
+                userDto.EmailConfirmed = false;
+                await identityService.CreateUserAsync(userDto);
+                var user = await context.Users.SingleAsync(x => x.UserName == userDto.UserName);
+                userId = user.Id;
+                sharedEmail = user.Email;
+                originalPhoneNumber = user.PhoneNumber;
+
+                var otherUserDto = IdentityDtoMock<string>.GenerateRandomUser();
+                await identityService.CreateUserAsync(otherUserDto);
+                var otherUser = await context.Users.SingleAsync(x => x.UserName == otherUserDto.UserName);
+                otherUserId = otherUser.Id;
+
+                // B's pending self-service claim: unconfirmed and non-primary.
+                var staleRow = await AddEmailRowAsync(context, otherUserId, sharedEmail, false, false);
+                staleRowId = staleRow.Id;
+
+                userDto.Id = userId;
+                userDto.PhoneNumber = "555-0100";
+
+                Func<Task> act = () => identityService.UpdateUserAsync(userDto);
+                (await act.Should().ThrowAsync<UserFriendlyViewException>())
+                    .Which.ErrorMessages.Should().Contain(m => m.ErrorMessage.Contains(sharedEmail));
+            }
+
+            // Fresh context: EF does not revert the change tracker on rollback.
+            using (var verifyContext = new AdminIdentityDbContext(_options))
+            {
+                (await verifyContext.Set<UserEmailAddress>().SingleOrDefaultAsync(x => x.Id == staleRowId))
+                    .Should().NotBeNull("an unrelated save must never delete another account's pending claim");
+
+                var reloadedUser = await verifyContext.Users.SingleAsync(x => x.Id == userId);
+                reloadedUser.PhoneNumber.Should().Be(originalPhoneNumber, "the refused primary-row sync must roll the whole profile save back");
+
+                var rowsForAddress = await verifyContext.Set<UserEmailAddress>()
+                    .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
+                rowsForAddress.Should().HaveCount(1, "two rows for one address break EmailAddressManager.GetEmailAsync");
+                rowsForAddress.Single().UserId.Should().Be(otherUserId);
+                (await verifyContext.Set<UserEmailAddress>().Where(x => x.UserId == userId).CountAsync()).Should().Be(0);
+            }
+        }
+
         // Round-4 critical, route 2: the legacy bootstrap inside CreateUserEmailAddressAsync runs
         // before any conflict check, so adding an unrelated address materialized a row for the login
         // email without ever checking it.

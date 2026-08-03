@@ -1861,10 +1861,13 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
             }
         }
 
-        // The clearing half of the policy at the choke point: a stale unconfirmed non-primary claim on
-        // another account is deleted rather than blocking, so exactly one row survives either way.
+        // Round-5 medium: the choke point is BLOCK-ONLY. Deleting another account's stale claim as a
+        // side effect of an unrelated save destroyed B's pending claim with nothing in the UI saying
+        // so, and left A holding an unconfirmed primary row that permanently blocked B (primary is
+        // un-stealable). Clearing stale claims is reserved for the paths where staff deliberately
+        // typed the address; here the save fails loudly and B's claim survives.
         [Fact]
-        public async Task UpdateUser_UnrelatedSaveOnLegacyUserWithStaleCrossAccountRow_ClearsItAndSucceeds()
+        public async Task UpdateUser_UnrelatedSaveOnLegacyUserWithStaleCrossAccountRow_FailsAndLeavesClaimIntact()
         {
             using (var context = new AdminIdentityDbContext(_dbContextOptions))
             {
@@ -1886,25 +1889,26 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 userDto.Id = user.Id;
                 userDto.PhoneNumber = "555-0100";
 
-                var (result, _) = await identityService.UpdateUserAsync(userDto);
-                result.Succeeded.Should().BeTrue();
+                Func<Task> act = () => identityService.UpdateUserAsync(userDto);
+                // The rejection must name the conflicting address, not just fail.
+                (await act.Should().ThrowAsync<UserFriendlyViewException>())
+                    .Which.ErrorMessages.Should().Contain(m => m.ErrorMessage.Contains(sharedEmail));
 
-                (await context.Set<UserEmailAddress>().Where(x => x.Id == staleRow.Id).SingleOrDefaultAsync()).Should().BeNull();
+                (await context.Set<UserEmailAddress>().Where(x => x.Id == staleRow.Id).SingleOrDefaultAsync())
+                    .Should().NotBeNull("an unrelated save must never delete another account's pending claim");
 
-                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
                 var rowsForAddress = await context.Set<UserEmailAddress>()
                     .Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).ToListAsync();
-                rowsForAddress.Should().HaveCount(1);
-                rowsForAddress.Single().UserId.Should().Be(user.Id);
-                rowsForAddress.Single().IsPrimary.Should().BeTrue();
-                rowsForAddress.Single().EmailConfirmed.Should().Be(reloadedUser.EmailConfirmed);
-                rowsForAddress.Single().EmailConfirmed.Should().BeFalse();
+                rowsForAddress.Should().HaveCount(1, "two rows for one address break EmailAddressManager.GetEmailAsync");
+                rowsForAddress.Single().UserId.Should().Be(otherUser.Id);
+                (await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).CountAsync()).Should().Be(0);
             }
         }
 
-        // Same clearing half on the bootstrap route.
+        // Same block-only rule on the bootstrap route: adding an unrelated address must not delete
+        // another account's pending claim to the legacy login email as a side effect.
         [Fact]
-        public async Task AddUserEmailAddress_LegacyBootstrapWithStaleCrossAccountRow_ClearsItAndSucceeds()
+        public async Task AddUserEmailAddress_LegacyBootstrapWithStaleCrossAccountRow_FailsAndLeavesClaimIntact()
         {
             using (var context = new AdminIdentityDbContext(_dbContextOptions))
             {
@@ -1923,19 +1927,17 @@ namespace Skoruba.IdentityServer4.Admin.UnitTests.Services
                 var staleRow = await AddEmailRowAsync(context, otherUser.Id, sharedEmail, false, false);
 
                 var result = await identityService.CreateUserEmailAddressAsync(new UserEmailAddressDto { UserId = user.Id, Email = "unrelated@example.com" });
-                result.Succeeded.Should().BeTrue();
 
-                (await context.Set<UserEmailAddress>().Where(x => x.Id == staleRow.Id).SingleOrDefaultAsync()).Should().BeNull();
+                result.Succeeded.Should().BeFalse();
+                // The message must name the conflicting address — the bootstrapped login email, not the
+                // address staff actually typed.
+                result.Errors.Should().Contain(e => e.Description.Contains(sharedEmail));
 
-                var reloadedUser = await context.Users.Where(x => x.Id == user.Id).SingleOrDefaultAsync();
-                var rows = await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).ToListAsync();
-                rows.Should().HaveCount(2);
-                rows.Single(r => r.IsPrimary).Email.Should().Be(sharedEmail);
-                rows.Single(r => r.IsPrimary).EmailConfirmed.Should().Be(reloadedUser.EmailConfirmed);
-                rows.Single(r => !r.IsPrimary).Email.Should().Be("unrelated@example.com");
-                rows.Single(r => !r.IsPrimary).EmailConfirmed.Should().BeTrue();
+                (await context.Set<UserEmailAddress>().Where(x => x.Id == staleRow.Id).SingleOrDefaultAsync())
+                    .Should().NotBeNull("the refused bootstrap must leave the other account's claim intact");
 
-                (await context.Set<UserEmailAddress>().Where(x => x.NormalizedEmail == sharedEmail.ToUpperInvariant()).CountAsync()).Should().Be(1);
+                (await context.Set<UserEmailAddress>().Where(x => x.UserId == user.Id).CountAsync()).Should().Be(0);
+                (await context.Set<UserEmailAddress>().Where(x => x.NormalizedEmail == "UNRELATED@EXAMPLE.COM").CountAsync()).Should().Be(0);
             }
         }
 
