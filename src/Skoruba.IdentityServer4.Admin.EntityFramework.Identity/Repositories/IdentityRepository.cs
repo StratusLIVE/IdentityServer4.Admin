@@ -446,10 +446,12 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
 
         public virtual async Task<IdentityResult> DeleteUserAsync(string userId)
         {
-            // The platform table has no FK to Users, so deleting a user would orphan its rows —
-            // and an orphaned confirmed row permanently blocks that address for every other
-            // account (the first-to-confirm policy can never clear it). One transaction so a
-            // failed user delete leaves the rows intact.
+            // Belt-and-braces alongside the FK cascade added in PlatformCore#3921: in an environment
+            // the migration hasn't reached yet, deleting a user would orphan its rows — and an
+            // orphaned confirmed row permanently blocks that address for every other account (the
+            // first-to-confirm policy can never clear it). Once the cascade has fired, the query
+            // below returns nothing, so the two don't fight. One transaction so a failed user
+            // delete leaves the rows intact.
             return await ExecuteInTransactionAsync(async () =>
             {
                 var userIdentity = await UserManager.FindByIdAsync(userId);
