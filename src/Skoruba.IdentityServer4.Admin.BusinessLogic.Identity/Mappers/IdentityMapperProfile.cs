@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Identity;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Shared.ExceptionHandling;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Common;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 
 namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Mappers
 {
@@ -110,6 +111,14 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Mappers
             // model to entity
             CreateMap<TUserDto, TUser>(MemberList.Source)
                 .ForMember(dest => dest.Id, opt => opt.Condition(srs => srs.Id != null)); ;
+
+            CreateMap<UserEmailAddress, UserEmailAddressDto>(MemberList.Destination)
+                .ForMember(x => x.EmailAddressId, opt => opt.MapFrom(src => src.Id))
+                .ForMember(x => x.UserName, opt => opt.Ignore());
+
+            CreateMap<UserEmailAddressDto, UserEmailAddress>(MemberList.Source)
+                .ForMember(x => x.Id, opt => opt.MapFrom(src => src.EmailAddressId))
+                .ForSourceMember(x => x.UserName, opt => opt.DoNotValidate());
         }
     }
 }

@@ -23,6 +23,11 @@ namespace Skoruba.IdentityServer4.Admin.UI.Areas.AdminUI.Controllers
             CreateNotification(NotificationHelpers.AlertType.Success, message, title);
         }
 
+        protected void ErrorNotification(string message, string title = "")
+        {
+            CreateNotification(NotificationHelpers.AlertType.Error, message, title);
+        }
+
         protected void CreateNotification(NotificationHelpers.AlertType type, string message, string title = "")
         {
             var toast = new NotificationHelpers.Alert

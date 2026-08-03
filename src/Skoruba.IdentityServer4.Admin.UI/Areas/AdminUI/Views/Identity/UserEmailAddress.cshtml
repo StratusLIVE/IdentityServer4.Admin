@@ -1,0 +1,63 @@
+﻿@using Microsoft.AspNetCore.Mvc.Localization
+@using Skoruba.IdentityServer4.Admin.UI.Configuration.Constants
+@model Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity.UserEmailAddressDto
+@inject IViewLocalizer Localizer
+
+@{
+	ViewBag.Title = Localizer["PageTitle"];
+	Layout = "_Layout";
+}
+
+<form asp-area="@CommonConsts.AdminUIArea" id="user-email-address-form" asp-controller="Identity" asp-action="UserEmailAddress" Method="post">
+	<div class="row">
+
+		<div class="col-12">
+			<nav aria-label="breadcrumb">
+				<ol class="breadcrumb">
+					<li class="breadcrumb-item"><a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="Users">@Localizer["NavigationUsers"]</a></li>
+					<li class="breadcrumb-item"><a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="UserProfile" asp-route-id="@Model.UserId">@Model.UserName</a></li>
+					<li class="breadcrumb-item"><a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="UserEmailAddresses" asp-route-id="@Model.UserId">@Localizer["NavigationUserEmailAddresses"]</a></li>
+					<li class="breadcrumb-item active" aria-current="page">@Localizer["PageTitle"]</li>
+				</ol>
+			</nav>
+		</div>
+
+		<div class="col-md-12">
+			<h3>@Localizer["PageTitle"]</h3>
+
+			<div asp-validation-summary="All" class="text-danger"></div>
+
+			<!--Hidden -->
+			<input type="hidden" asp-for="UserId" />
+
+			<!--Hidden -->
+			<input type="hidden" asp-for="EmailAddressId" />
+
+			<div class="card mt-3">
+				<h5 class="card-header">@Localizer["PanelTitle"]</h5>
+				<div class="card-body">
+
+					<!--Input - text -->
+					<div class="form-group row">
+						<label asp-for="Email" class="col-sm-3 col-form-label">
+							@Localizer["LabelEmail"]
+						</label>
+						<div class="col-sm-9">
+							<input type="email" required class="form-control" asp-for="Email">
+							<span asp-validation-for="Email" class="text-danger"></span>
+						</div>
+					</div>
+
+					<!--Button-->
+					<div class="form-group row">
+						<label class="col-sm-3 col-form-label">
+						</label>
+						<div class="col-sm-9">
+							<button type="submit" class="btn btn-primary">@Localizer["ButtonSaveEmailAddress"]</button>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</form>

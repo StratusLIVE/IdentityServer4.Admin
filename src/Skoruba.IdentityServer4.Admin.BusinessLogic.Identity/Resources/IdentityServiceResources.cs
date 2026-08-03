@@ -67,6 +67,51 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources
             };
         }
 
+        public virtual ResourceMessage UserEmailAddressDoesNotExist()
+        {
+            return new ResourceMessage()
+            {
+                Code = nameof(UserEmailAddressDoesNotExist),
+                Description = IdentityServiceResource.UserEmailAddressDoesNotExist
+            };
+        }
+
+        public virtual ResourceMessage UserEmailAddressLimitReached()
+        {
+            return new ResourceMessage()
+            {
+                Code = nameof(UserEmailAddressLimitReached),
+                Description = IdentityServiceResource.UserEmailAddressLimitReached
+            };
+        }
+
+        public virtual ResourceMessage UserEmailAddressPrimaryDelete()
+        {
+            return new ResourceMessage()
+            {
+                Code = nameof(UserEmailAddressPrimaryDelete),
+                Description = IdentityServiceResource.UserEmailAddressPrimaryDelete
+            };
+        }
+
+        public virtual ResourceMessage UserEmailAddressConflict()
+        {
+            return new ResourceMessage()
+            {
+                Code = nameof(UserEmailAddressConflict),
+                Description = IdentityServiceResource.UserEmailAddressConflict
+            };
+        }
+
+        public virtual ResourceMessage UserEmailAddressDuplicate()
+        {
+            return new ResourceMessage()
+            {
+                Code = nameof(UserEmailAddressDuplicate),
+                Description = IdentityServiceResource.UserEmailAddressDuplicate
+            };
+        }
+
         public virtual ResourceMessage UserDeleteFailed()
         {
             return new ResourceMessage()

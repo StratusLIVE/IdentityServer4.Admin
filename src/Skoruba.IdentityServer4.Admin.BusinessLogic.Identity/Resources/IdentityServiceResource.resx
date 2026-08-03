@@ -168,6 +168,21 @@
   <data name="UserDoesNotExist" xml:space="preserve">
     <value>User with id {0} doesn't exist</value>
   </data>
+  <data name="UserEmailAddressDoesNotExist" xml:space="preserve">
+    <value>Email address {0} does not exist</value>
+  </data>
+  <data name="UserEmailAddressLimitReached" xml:space="preserve">
+    <value>An account may have at most 3 email addresses</value>
+  </data>
+  <data name="UserEmailAddressPrimaryDelete" xml:space="preserve">
+    <value>The primary email address cannot be deleted. Set another address as primary first.</value>
+  </data>
+  <data name="UserEmailAddressConflict" xml:space="preserve">
+    <value>Email {0} is already associated with another account</value>
+  </data>
+  <data name="UserEmailAddressDuplicate" xml:space="preserve">
+    <value>Email {0} is already associated with this account</value>
+  </data>
   <data name="UserProviderDeleteFailed" xml:space="preserve">
     <value>User Provider deleting failed</value>
   </data>

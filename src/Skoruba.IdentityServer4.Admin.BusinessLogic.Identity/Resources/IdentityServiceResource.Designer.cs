@@ -213,7 +213,52 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources {
                 return ResourceManager.GetString("UserDoesNotExist", resourceCulture);
             }
         }
-        
+
+        /// <summary>
+        ///   Looks up a localized string similar to Email address {0} does not exist.
+        /// </summary>
+        public static string UserEmailAddressDoesNotExist {
+            get {
+                return ResourceManager.GetString("UserEmailAddressDoesNotExist", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to An account may have at most 3 email addresses.
+        /// </summary>
+        public static string UserEmailAddressLimitReached {
+            get {
+                return ResourceManager.GetString("UserEmailAddressLimitReached", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The primary email address cannot be deleted. Set another address as primary first..
+        /// </summary>
+        public static string UserEmailAddressPrimaryDelete {
+            get {
+                return ResourceManager.GetString("UserEmailAddressPrimaryDelete", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Email {0} is already associated with another account.
+        /// </summary>
+        public static string UserEmailAddressConflict {
+            get {
+                return ResourceManager.GetString("UserEmailAddressConflict", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to Email {0} is already associated with this account.
+        /// </summary>
+        public static string UserEmailAddressDuplicate {
+            get {
+                return ResourceManager.GetString("UserEmailAddressDuplicate", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized string similar to User Provider deleting failed.
         /// </summary>

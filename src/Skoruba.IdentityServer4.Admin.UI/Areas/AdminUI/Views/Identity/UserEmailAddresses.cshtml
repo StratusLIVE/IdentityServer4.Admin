@@ -1,0 +1,84 @@
+﻿@using Microsoft.AspNetCore.Mvc.Localization
+@using Skoruba.IdentityServer4.Admin.UI.Configuration.Constants
+@model Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Dtos.Identity.UserEmailAddressesDto
+@inject IViewLocalizer Localizer
+
+@{
+	ViewBag.Title = Localizer["PageTitle"];
+	Layout = "_Layout";
+}
+
+<div class="row">
+
+	<div class="col-12">
+		<nav aria-label="breadcrumb">
+			<ol class="breadcrumb">
+				<li class="breadcrumb-item"><a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="Users">@Localizer["NavigationUsers"]</a></li>
+				<li class="breadcrumb-item"><a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="UserProfile" asp-route-id="@Model.UserId">@Model.UserName</a></li>
+				<li class="breadcrumb-item active" aria-current="page">@Localizer["PageTitle"]</li>
+			</ol>
+		</nav>
+	</div>
+
+	<div class="col-md-12">
+		<h3>@Localizer["PageTitle"]</h3>
+
+		<div class="form-group row">
+			<div class="col-md-12">
+				<a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="UserEmailAddress" asp-route-id="@Model.UserId" class="btn btn-primary">@Localizer["ButtonAddEmailAddress"]</a>
+			</div>
+		</div>
+
+		<div class="card mt-3">
+			<h5 class="card-header">@Localizer["PanelTitle"]</h5>
+			<div class="card-body">
+
+				<div class="row table-responsive">
+					<table class="table table-striped">
+						<thead>
+							<tr>
+								<th>@Localizer["TableEmail"]</th>
+								<th>@Localizer["TableStatus"]</th>
+								<th></th>
+							</tr>
+						</thead>
+						<tbody>
+							@foreach (var emailAddress in Model.EmailAddresses)
+							{
+								<tr>
+									<td>@emailAddress.Email</td>
+									<td>
+										@if (emailAddress.IsPrimary)
+										{
+											<span class="badge badge-primary">@Localizer["BadgePrimary"]</span>
+										}
+										@if (emailAddress.EmailConfirmed)
+										{
+											<span class="badge badge-success">@Localizer["BadgeConfirmed"]</span>
+										}
+										else
+										{
+											<span class="badge badge-warning">@Localizer["BadgeUnconfirmed"]</span>
+										}
+									</td>
+									<td>
+										<a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="UserEmailAddress" asp-route-id="@Model.UserId" asp-route-emailAddressId="@emailAddress.EmailAddressId" class="btn btn-outline-primary">@Localizer["TableButtonEdit"]</a>
+
+										@if (!emailAddress.IsPrimary)
+										{
+											<a asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="UserEmailAddressDelete" asp-route-id="@Model.UserId" asp-route-emailAddressId="@emailAddress.EmailAddressId" class="btn btn-danger">@Localizer["TableButtonRemove"]</a>
+
+											<form asp-area="@CommonConsts.AdminUIArea" asp-controller="Identity" asp-action="UserEmailAddressSetPrimary" asp-route-id="@Model.UserId" asp-route-emailAddressId="@emailAddress.EmailAddressId" method="post" class="d-inline">
+												<button type="submit" class="btn btn-outline-secondary">@Localizer["TableButtonSetPrimary"]</button>
+											</form>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>

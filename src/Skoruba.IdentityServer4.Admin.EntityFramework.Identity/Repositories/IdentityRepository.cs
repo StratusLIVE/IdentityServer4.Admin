@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Common;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Enums;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Extensions;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.Interfaces;
 
 namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
@@ -72,12 +73,28 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         public virtual async Task<PagedList<TUser>> GetUsersAsync(string search, int page = 1, int pageSize = 10)
         {
             var pagedList = new PagedList<TUser>();
-            Expression<Func<TUser, bool>> searchCondition = x => x.UserName.Contains(search) || x.Email.Contains(search);
+
+            // Users whose secondary/legacy email matches — resolved first because UserEmailAddress.UserId
+            // is string while TUser.Id is TKey; the id list translates to a SQL IN clause.
+            var emailMatchIds = new List<TKey>();
+            if (!string.IsNullOrEmpty(search))
+            {
+                emailMatchIds = (await DbContext.Set<UserEmailAddress>()
+                        .Where(e => e.Email.Contains(search))
+                        .Select(e => e.UserId)
+                        .Distinct()
+                        .Take(1000)   // bounds the IN-clause when a junk term ("@") matches every row
+                        .ToListAsync())
+                    .Select(ConvertKeyFromString)
+                    .ToList();
+            }
+
+            Expression<Func<TUser, bool>> searchCondition = x =>
+                x.UserName.Contains(search) || x.Email.Contains(search) || emailMatchIds.Contains(x.Id);
 
             var users = await UserManager.Users.WhereIf(!string.IsNullOrEmpty(search), searchCondition).PageBy(x => x.Id, page, pageSize).ToListAsync();
 
             pagedList.Data.AddRange(users);
-
             pagedList.TotalCount = await UserManager.Users.WhereIf(!string.IsNullOrEmpty(search), searchCondition).CountAsync();
             pagedList.PageSize = pageSize;
 
@@ -183,6 +200,12 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         /// <returns>This method returns identity result and new user id</returns>
         public virtual async Task<(IdentityResult identityResult, TKey userId)> CreateUserAsync(TUser user)
         {
+            // [EmailAddress] accepts surrounding whitespace and SQL Server compares strings
+            // trailing-space-insensitively, so an untrimmed address silently coexists with its trimmed
+            // twin — two rows for one address. The service layer already trims; do it here too so every
+            // write path is covered.
+            user.Email = user.Email?.Trim();
+
             var identityResult = await UserManager.CreateAsync(user);
 
             return (identityResult, user.Id);
@@ -190,9 +213,46 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
 
         public virtual async Task<(IdentityResult identityResult, TKey userId)> UpdateUserAsync(TUser user)
         {
-            var userIdentity = await UserManager.FindByIdAsync(user.Id.ToString());
-            Mapper.Map(user, userIdentity);
-            var identityResult = await UserManager.UpdateAsync(userIdentity);
+            // See CreateUserAsync: an untrimmed address is a same-address duplicate waiting to happen,
+            // because the match lookup below normalizes exactly while SQL Server's = ignores trailing
+            // spaces. Trim before anything reads user.Email.
+            user.Email = user.Email?.Trim();
+
+            // Ownership check + Users update + primary-row sync in ONE transaction so a sync
+            // failure can't leave Users.Email diverged from the primary row (review #3/#5).
+            var identityResult = await ExecuteInTransactionAsync(async () =>
+            {
+                var userIdentity = await UserManager.FindByIdAsync(user.Id.ToString());
+
+                if (!string.IsNullOrEmpty(user.Email))
+                {
+                    var normalized = UserManager.NormalizeEmail(user.Email);
+                    if (!string.Equals(normalized, userIdentity.NormalizedEmail, StringComparison.Ordinal))
+                    {
+                        // Identity's unique-email validation only sees Users.Email, and blocking alone
+                        // isn't enough: an unconfirmed non-primary row left on another account plus the
+                        // confirmed primary row the sync below creates would be two rows for one address,
+                        // which throws in IdentityServer's SingleOrDefault readers (review round-3). Run the
+                        // full first-to-confirm policy — block or clear — before touching either store.
+                        //
+                        // Gated on the address actually changing so an unrelated profile save is never
+                        // rejected by pre-existing dirty data.
+                        //
+                        // Not redundant with the choke point in SyncPrimaryEmailRowAsync: that one is
+                        // block-only enforcement that cannot be bypassed, while this call is the ONLY
+                        // place on the profile path that may CLEAR another account's stale claim —
+                        // deliberately gated on staff having typed the address (review round-5). Keep both.
+                        if (!await TryResolveCrossAccountEmailConflictAsync(user.Id.ToString(), user.Email))
+                            return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
+                    }
+                }
+
+                Mapper.Map(user, userIdentity);
+                var updateResult = await UserManager.UpdateAsync(userIdentity);
+                if (!updateResult.Succeeded) return updateResult;
+
+                return await SyncPrimaryEmailRowAsync(userIdentity);
+            });
 
             return (identityResult, user.Id);
         }
@@ -386,9 +446,27 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
 
         public virtual async Task<IdentityResult> DeleteUserAsync(string userId)
         {
-            var userIdentity = await UserManager.FindByIdAsync(userId);
+            // Belt-and-braces alongside the FK cascade added in PlatformCore#3921: in an environment
+            // the migration hasn't reached yet, deleting a user would orphan its rows — and an
+            // orphaned confirmed row permanently blocks that address for every other account (the
+            // first-to-confirm policy can never clear it). Once the cascade has fired, the query
+            // below returns nothing, so the two don't fight. One transaction so a failed user
+            // delete leaves the rows intact.
+            return await ExecuteInTransactionAsync(async () =>
+            {
+                var userIdentity = await UserManager.FindByIdAsync(userId);
+                var identityResult = await UserManager.DeleteAsync(userIdentity);
+                if (!identityResult.Succeeded) return identityResult;
 
-            return await UserManager.DeleteAsync(userIdentity);
+                var rows = await UserEmailAddresses.Where(e => e.UserId == userId).ToListAsync();
+                if (rows.Count > 0)
+                {
+                    UserEmailAddresses.RemoveRange(rows);
+                    await AutoSaveChangesAsync();
+                }
+
+                return identityResult;
+            });
         }
 
         protected virtual async Task<int> AutoSaveChangesAsync()
@@ -399,6 +477,290 @@ namespace Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories
         public virtual async Task<int> SaveAllChangesAsync()
         {
             return await DbContext.SaveChangesAsync();
+        }
+
+        protected DbSet<UserEmailAddress> UserEmailAddresses => DbContext.Set<UserEmailAddress>();
+
+        public virtual Task<List<UserEmailAddress>> GetUserEmailAddressesAsync(string userId)
+        {
+            return UserEmailAddresses.Where(e => e.UserId == userId).OrderByDescending(e => e.IsPrimary).ThenBy(e => e.Email).ToListAsync();
+        }
+
+        public virtual Task<UserEmailAddress> GetUserEmailAddressAsync(string emailAddressId)
+        {
+            return UserEmailAddresses.SingleOrDefaultAsync(e => e.Id == emailAddressId);
+        }
+
+        public virtual Task<List<UserEmailAddress>> GetUserEmailAddressesByEmailAsync(string email)
+        {
+            // Duplicate rows across accounts are expected (legacy migration data) — never Single here.
+            // Match NormalizedEmail primarily; legacy rows may have null NormalizedEmail, so keep the
+            // raw Email fallback rather than relying on DB collation alone.
+            var normalized = UserManager.NormalizeEmail(email);
+            return UserEmailAddresses.Where(e => e.NormalizedEmail == normalized || e.Email == email).ToListAsync();
+        }
+
+        public virtual Task<bool> AnyOtherUserWithConfirmedEmailAsync(string email, string excludeUserId)
+        {
+            var id = ConvertKeyFromString(excludeUserId);
+            var normalized = UserManager.NormalizeEmail(email);
+            return UserManager.Users.AnyAsync(u => u.NormalizedEmail == normalized && u.EmailConfirmed && !u.Id.Equals(id));
+        }
+
+        // First-to-confirm, shared by the profile-edit path (UpdateUserAsync) and the
+        // address-management paths (IdentityService.ResolveCrossAccountConflictAsync) so the policy
+        // exists in exactly one place. Returns false when the address is already claimed by another
+        // account: a CONFIRMED row blocks, and so does a PRIMARY row even when unconfirmed —
+        // deleting another account's primary would strand its Users.Email, the exact drift this
+        // feature exists to fix. A confirmed Users.Email match with no row at all (legacy accounts)
+        // blocks too. Otherwise the other accounts' unconfirmed non-primary rows are stale claims
+        // and are deleted, so only the caller's row survives for this address.
+        //
+        // Callers must run this inside their own transaction (ExecuteInTransactionAsync) so the
+        // deletes roll back with the rest of the write.
+        public virtual async Task<bool> TryResolveCrossAccountEmailConflictAsync(string userId, string email)
+        {
+            var confirmedOnOtherUser = await AnyOtherUserWithConfirmedEmailAsync(email, userId);
+            if (confirmedOnOtherUser) return false;
+
+            var allRows = await GetUserEmailAddressesByEmailAsync(email);
+            if (allRows.Any(r => r.UserId != userId && (r.EmailConfirmed || r.IsPrimary))) return false;
+
+            var stale = allRows.Where(r => r.UserId != userId && !r.EmailConfirmed && !r.IsPrimary).ToList();
+            if (stale.Count > 0)
+            {
+                UserEmailAddresses.RemoveRange(stale);
+                await AutoSaveChangesAsync();
+            }
+
+            return true;
+        }
+
+        // Block-only companion to TryResolveCrossAccountEmailConflictAsync, for callers that did NOT
+        // get the address typed at them (review round-5). It must be STRICTER than the resolve: any
+        // other account's row blocks — including the stale unconfirmed non-primary ones the resolve
+        // would delete — because without the delete, materializing a row alongside one is the
+        // two-rows-per-address state that breaks IdentityServer's SingleOrDefault readers.
+        protected virtual async Task<bool> IsEmailClaimedByAnotherUserAsync(string userId, string email)
+        {
+            if (await AnyOtherUserWithConfirmedEmailAsync(email, userId)) return true;
+
+            var allRows = await GetUserEmailAddressesByEmailAsync(email);
+            return allRows.Any(r => r.UserId != userId);
+        }
+
+        public virtual Task<IdentityResult> AddUserEmailAddressAsync(UserEmailAddress emailAddress)
+        {
+            return ExecuteInTransactionAsync(() => AddUserEmailAddressCoreAsync(emailAddress));
+        }
+
+        private async Task<IdentityResult> AddUserEmailAddressCoreAsync(UserEmailAddress emailAddress)
+        {
+            emailAddress.Id = Guid.NewGuid().ToString();
+            emailAddress.NormalizedEmail = UserManager.NormalizeEmail(emailAddress.Email);
+            await UserEmailAddresses.AddAsync(emailAddress);
+            await AutoSaveChangesAsync();
+            if (emailAddress.IsPrimary)
+            {
+                return await SyncUserPrimaryEmailAsync(emailAddress.UserId, emailAddress.Email);
+            }
+            return IdentityResult.Success;
+        }
+
+        public virtual Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddress emailAddress)
+        {
+            return ExecuteInTransactionAsync(() => UpdateUserEmailAddressCoreAsync(emailAddress));
+        }
+
+        private async Task<IdentityResult> UpdateUserEmailAddressCoreAsync(UserEmailAddress emailAddress)
+        {
+            var existing = await UserEmailAddresses.SingleOrDefaultAsync(e => e.Id == emailAddress.Id);
+            if (existing == null) return IdentityResult.Failed(new IdentityError { Description = "Email address not found." });
+
+            existing.Email = emailAddress.Email;
+            existing.NormalizedEmail = UserManager.NormalizeEmail(emailAddress.Email);
+            existing.EmailConfirmed = emailAddress.EmailConfirmed;
+            await AutoSaveChangesAsync();
+            if (existing.IsPrimary)
+            {
+                return await SyncUserPrimaryEmailAsync(existing.UserId, existing.Email);
+            }
+            return IdentityResult.Success;
+        }
+
+        public virtual async Task<IdentityResult> DeleteUserEmailAddressAsync(string emailAddressId)
+        {
+            var existing = await UserEmailAddresses.SingleOrDefaultAsync(e => e.Id == emailAddressId);
+            if (existing == null) return IdentityResult.Failed(new IdentityError { Description = "Email address not found." });
+            UserEmailAddresses.Remove(existing);
+            await AutoSaveChangesAsync();
+            return IdentityResult.Success;
+        }
+
+        public virtual Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId)
+        {
+            return ExecuteInTransactionAsync(() => SetPrimaryUserEmailAddressCoreAsync(userId, emailAddressId));
+        }
+
+        private async Task<IdentityResult> SetPrimaryUserEmailAddressCoreAsync(string userId, string emailAddressId)
+        {
+            var rows = await UserEmailAddresses.Where(e => e.UserId == userId).ToListAsync();
+            var target = rows.SingleOrDefault(e => e.Id == emailAddressId);
+            if (target == null) return IdentityResult.Failed(new IdentityError { Description = "Email address not found." });
+
+            foreach (var row in rows.Where(r => r.IsPrimary && r.Id != emailAddressId)) row.IsPrimary = false;
+            target.IsPrimary = true;
+            target.EmailConfirmed = true;
+            await AutoSaveChangesAsync();
+            return await SyncUserPrimaryEmailAsync(userId, target.Email);
+        }
+
+        // Wraps the row-save + Users table sync in one transaction so a second-save failure
+        // can't leave the email row and Users.Email diverged. Joins an ambient transaction when
+        // one is already open. InMemory provider (unit tests) doesn't support transactions,
+        // so it's skipped there.
+        public virtual async Task<IdentityResult> ExecuteInTransactionAsync(Func<Task<IdentityResult>> action)
+        {
+            if (!DbContext.Database.IsRelational() || DbContext.Database.CurrentTransaction != null)
+            {
+                return await action();
+            }
+
+            await using var transaction = await DbContext.Database.BeginTransactionAsync();
+            var result = await action();
+            if (result.Succeeded)
+            {
+                await transaction.CommitAsync();
+            }
+            return result;
+        }
+
+        // Keeps Users.Email/NormalizedEmail in lockstep with the primary UserEmailAddresses row
+        // (drift between the two causes sign-in loops — the GMWC incident).
+        protected virtual async Task<IdentityResult> SyncUserPrimaryEmailAsync(string userId, string email)
+        {
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null) return IdentityResult.Failed(new IdentityError { Description = "User not found." });
+            user.Email = email;
+            user.NormalizedEmail = UserManager.NormalizeEmail(email);
+            user.EmailConfirmed = true;
+            return await UserManager.UpdateAsync(user);
+        }
+
+        // Materializes a primary row from Users.Email for legacy accounts that predate the
+        // UserEmailAddresses table (no-op when a primary row already exists or the user has no email).
+        // The bootstrapped row inherits the account's real Users.EmailConfirmed rather than claiming
+        // the address is verified; an unconfirmed primary row is still un-stealable because
+        // TryResolveCrossAccountEmailConflictAsync blocks on IsPrimary.
+        //
+        // Callers must hold a transaction: the sync below writes the bootstrapped row, and that write
+        // must roll back with the rest of the caller's operation when a later step fails.
+        public virtual async Task<IdentityResult> EnsurePrimaryEmailRowAsync(string userId)
+        {
+            var user = await UserManager.FindByIdAsync(userId);
+            if (user == null) return IdentityResult.Failed(new IdentityError { Description = "User not found." });
+            return await SyncPrimaryEmailRowAsync(user);
+        }
+
+        // Editing Users.Email on the admin user page must not strand the old value in the
+        // primary UserEmailAddresses row (drift causes sign-in loops).
+        //
+        // Match-first: if the user already has a row for this address, promote THAT row rather than
+        // writing the address into a second row. Both the insert branch and the primary-rewrite
+        // branch could otherwise produce two rows with the same Email on one user, which throws in
+        // IdentityServer's EmailAddressManager.GetEmailAsync (SingleOrDefault on a non-unique column)
+        // on the login-by-email path.
+        //
+        // Confirmation rule (review round-3): the primary row MIRRORS Users.EmailConfirmed, which the
+        // caller has already persisted from the profile's explicit checkbox. Forcing the row to true
+        // let the two stores disagree — a profile saved with the box clear produced
+        // Users.EmailConfirmed=false alongside a confirmed row, and an unrelated edit silently
+        // confirmed the row. Mirroring keeps the pair in agreement and leaves staff able to clear
+        // the box to force re-verification. The opposite direction (SyncUserPrimaryEmailAsync, the
+        // address-management paths) sets BOTH to true, so that pair agrees as well.
+        //
+        // Cross-account choke point (review round-4): when no own-row matches, this is the ONLY place a
+        // row is ever created for the address, so enforcement runs here rather than being trusted to
+        // every caller. Both callers could otherwise skip it — UpdateUserAsync's guard only fires when
+        // the address changed, and the legacy bootstrap never checks at all. The enforcement is
+        // BLOCK-ONLY (review round-5); clearing stale claims stays on the typed-address paths.
+        protected virtual async Task<IdentityResult> SyncPrimaryEmailRowAsync(TUser user)
+        {
+            if (string.IsNullOrEmpty(user.Email)) return IdentityResult.Success;
+
+            var userId = user.Id.ToString();
+            var normalized = UserManager.NormalizeEmail(user.Email);
+            var rows = await UserEmailAddresses.Where(e => e.UserId == userId).ToListAsync();
+
+            // Kept at least as wide as GetUserEmailAddressesByEmailAsync's conflict lookup: anything that
+            // lookup would treat as the same address must match here, or the branches below materialize a
+            // second row for it. Legacy rows may have a null NormalizedEmail OR a wrongly-cased one
+            // (lowercased by old code), so the raw-Email fallback is unconditional rather than gated on
+            // null — a populated-but-wrong NormalizedEmail must still match.
+            var match = rows.FirstOrDefault(e => e.NormalizedEmail == normalized
+                || string.Equals(e.Email, user.Email, StringComparison.OrdinalIgnoreCase));
+
+            if (match != null)
+            {
+                // No cross-account policy here on purpose: the user ALREADY holds a row for this
+                // address, so promoting it creates no new claim and cannot increase the row count for
+                // the address. The writes below also heal a bad NormalizedEmail on that row.
+                foreach (var row in rows.Where(r => r.IsPrimary && r.Id != match.Id)) row.IsPrimary = false;
+                match.Email = user.Email;          // adopt the casing staff just entered
+                match.NormalizedEmail = normalized;
+                match.EmailConfirmed = user.EmailConfirmed;
+                match.IsPrimary = true;
+                await AutoSaveChangesAsync();
+                return IdentityResult.Success;
+            }
+
+            // Both remaining branches materialize a NEW claim on user.Email — rewriting the primary
+            // row or inserting one. Neither caller is guaranteed to have run the policy (the
+            // profile-edit guard is gated on the address changing, and the legacy bootstrap never
+            // checks the legacy address at all), so enforce it here, at the only place rows are
+            // created for this address. Fails loudly rather than skipping: skipping would leave the
+            // Users.Email/primary-row drift this sync exists to prevent.
+            //
+            // BLOCK-ONLY on purpose (review round-5): this runs on every UpdateUserAsync, so running
+            // the delete half of the policy here let a phone-number-only save silently destroy another
+            // account's pending claim — and the unconfirmed primary row materialized for this user then
+            // blocked that account permanently (primary is un-stealable). Clearing stale claims is
+            // reserved for the paths where staff deliberately typed the address: UpdateUserAsync's
+            // changed-address guard and the address-management paths, which run
+            // TryResolveCrossAccountEmailConflictAsync earlier in the same transaction — so by the
+            // time control reaches here on those paths, the stale rows are already gone and this
+            // stricter check passes.
+            if (await IsEmailClaimedByAnotherUserAsync(userId, user.Email))
+                return IdentityResult.Failed(new IdentityError { Description = $"Email {user.Email} is already associated with another account." });
+
+            var primary = rows.FirstOrDefault(e => e.IsPrimary);
+            if (primary != null)
+            {
+                primary.Email = user.Email;
+                primary.NormalizedEmail = normalized;
+                primary.EmailConfirmed = user.EmailConfirmed;
+                await AutoSaveChangesAsync();
+                return IdentityResult.Success;
+            }
+
+            // No primary and no matching row: an insert is the only way to keep Users.Email and the
+            // primary row in lockstep. At the cap that is impossible, and silently succeeding would
+            // leave exactly the drift this sync exists to prevent — so surface it as a failure and
+            // let the caller's transaction roll the Users.Email write back.
+            if (rows.Count >= UserEmailAddress.MaxPerUser)
+                return IdentityResult.Failed(new IdentityError { Description = $"Cannot set {user.Email} as the primary email address: this user already has the maximum of {UserEmailAddress.MaxPerUser} email addresses and none of them match. Remove one first." });
+
+            await UserEmailAddresses.AddAsync(new UserEmailAddress
+            {
+                Id = Guid.NewGuid().ToString(),
+                UserId = userId,
+                Email = user.Email,
+                NormalizedEmail = normalized,
+                EmailConfirmed = user.EmailConfirmed,
+                IsPrimary = true
+            });
+            await AutoSaveChangesAsync();
+            return IdentityResult.Success;
         }
     }
 }

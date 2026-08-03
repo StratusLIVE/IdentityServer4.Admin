@@ -120,6 +120,9 @@
   <data name="ErrorDeleteUser_CannotSelfDelete" xml:space="preserve">
     <value>You cannot delete yourself. If you want to delete this account, first create a new administrative account, then switch to it and delete this account from there.</value>
   </data>
+  <data name="ErrorTitle" xml:space="preserve">
+    <value>Error</value>
+  </data>
   <data name="SuccessCreateRole" xml:space="preserve">
     <value>Role {0} is successfully saved!</value>
   </data>
@@ -147,11 +150,20 @@
   <data name="SuccessDeleteUserClaims" xml:space="preserve">
     <value>Claim is successfully deleted!</value>
   </data>
+  <data name="SuccessDeleteUserEmailAddress" xml:space="preserve">
+    <value>Email address {0} was deleted</value>
+  </data>
   <data name="SuccessDeleteUserProviders" xml:space="preserve">
     <value>User Provider is successfully deleted!</value>
   </data>
   <data name="SuccessDeleteUserRole" xml:space="preserve">
     <value>Role is successfully deleted!</value>
+  </data>
+  <data name="SuccessSaveUserEmailAddress" xml:space="preserve">
+    <value>Email address {0} was saved</value>
+  </data>
+  <data name="SuccessSetPrimaryUserEmailAddress" xml:space="preserve">
+    <value>Primary email address was updated</value>
   </data>
   <data name="SuccessTitle" xml:space="preserve">
     <value>Success</value>

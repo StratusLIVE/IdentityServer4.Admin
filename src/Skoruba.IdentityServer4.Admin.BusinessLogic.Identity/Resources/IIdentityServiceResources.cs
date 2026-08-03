@@ -19,7 +19,12 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Resources
         ResourceMessage UserClaimsDeleteFailed();
         ResourceMessage UserCreateFailed();
         ResourceMessage UserDeleteFailed();
-        ResourceMessage UserDoesNotExist(); 
+        ResourceMessage UserDoesNotExist();
+        ResourceMessage UserEmailAddressDoesNotExist();
+        ResourceMessage UserEmailAddressLimitReached();
+        ResourceMessage UserEmailAddressPrimaryDelete();
+        ResourceMessage UserEmailAddressConflict();
+        ResourceMessage UserEmailAddressDuplicate();
         ResourceMessage UserChangePasswordFailed();
         ResourceMessage UserProviderDeleteFailed();
         ResourceMessage UserProviderDoesNotExist();

@@ -13,6 +13,7 @@ using Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services.Interfaces;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Shared.Dtos.Common;
 using Skoruba.IdentityServer4.Admin.BusinessLogic.Shared.ExceptionHandling;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Extensions.Common;
+using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Entities;
 using Skoruba.IdentityServer4.Admin.EntityFramework.Identity.Repositories.Interfaces;
 
 namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
@@ -239,9 +240,13 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
         {
             var identityResult = await IdentityRepository.DeleteUserAsync(userId);
 
+            // Check first, audit second (as every sibling does): a failed delete rolls the user and its
+            // email rows back together, so auditing before the check records a deletion that never happened.
+            var handleIdentityError = HandleIdentityError(identityResult, IdentityServiceResources.UserDeleteFailed().Description, IdentityServiceResources.IdentityErrorKey().Description, user);
+
             await AuditEventLogger.LogEventAsync(new UserDeletedEvent<TUserDto>(user));
 
-            return HandleIdentityError(identityResult, IdentityServiceResources.UserDeleteFailed().Description, IdentityServiceResources.IdentityErrorKey().Description, user);
+            return handleIdentityError;
         }
 
         public virtual async Task<IdentityResult> CreateUserRoleAsync(TUserRolesDto role)
@@ -495,6 +500,175 @@ namespace Skoruba.IdentityServer4.Admin.BusinessLogic.Identity.Services
             await AuditEventLogger.LogEventAsync(new RoleDeletedEvent<TRoleDto>(role));
 
             return HandleIdentityError(identityResult, IdentityServiceResources.RoleDeleteFailed().Description, IdentityServiceResources.IdentityErrorKey().Description, role);
+        }
+
+        public virtual async Task<UserEmailAddressesDto> GetUserEmailAddressesAsync(string userId)
+        {
+            var userExists = await IdentityRepository.ExistsUserAsync(userId);
+            if (!userExists) throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserDoesNotExist().Description, userId), IdentityServiceResources.UserDoesNotExist().Description);
+
+            var rows = await IdentityRepository.GetUserEmailAddressesAsync(userId);
+            var user = await IdentityRepository.GetUserAsync(userId);
+            var dto = new UserEmailAddressesDto
+            {
+                UserId = userId,
+                UserName = user.UserName,
+                EmailAddresses = Mapper.Map<List<UserEmailAddressDto>>(rows)
+            };
+
+            await AuditEventLogger.LogEventAsync(new UserEmailAddressesRequestedEvent(dto));
+            return dto;
+        }
+
+        public virtual async Task<UserEmailAddressDto> GetUserEmailAddressAsync(string userId, string emailAddressId)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(emailAddressId);
+            if (row == null || row.UserId != userId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, emailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+            return Mapper.Map<UserEmailAddressDto>(row);
+        }
+
+        public virtual async Task<IdentityResult> CreateUserEmailAddressAsync(UserEmailAddressDto dto)
+        {
+            var userExists = await IdentityRepository.ExistsUserAsync(dto.UserId);
+            if (!userExists) throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserDoesNotExist().Description, dto.UserId), IdentityServiceResources.UserDoesNotExist().Description);
+
+            var email = dto.Email.Trim();
+            UserEmailAddress entity = null;
+            var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
+            {
+                var user = await IdentityRepository.GetUserAsync(dto.UserId);
+                var currentRows = await IdentityRepository.GetUserEmailAddressesAsync(dto.UserId);
+
+                // Legacy accounts predate UserEmailAddresses: materialize Users.Email as the primary
+                // row first so the added address can never steal primary from the login email.
+                if (currentRows.Count == 0 && !string.IsNullOrEmpty(user.Email))
+                {
+                    var bootstrap = await IdentityRepository.EnsurePrimaryEmailRowAsync(dto.UserId);
+                    if (!bootstrap.Succeeded) return bootstrap;
+                    currentRows = await IdentityRepository.GetUserEmailAddressesAsync(dto.UserId);
+                }
+
+                // Checked after the bootstrap so re-entering a legacy user's login email is caught,
+                // and before the cap so the rejection names the real reason.
+                var duplicate = await CheckSameUserDuplicateAsync(dto.UserId, email);
+                if (duplicate != null) return duplicate;
+
+                if (currentRows.Count >= UserEmailAddress.MaxPerUser)
+                    return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressLimitReached().Description });
+
+                var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
+                if (conflict != null) return conflict;
+
+                entity = new UserEmailAddress
+                {
+                    UserId = dto.UserId,
+                    Email = email,
+                    EmailConfirmed = true,                 // staff intervention implies verification
+                    IsPrimary = currentRows.Count == 0     // only a user with no email at all gets a new primary
+                };
+                return await IdentityRepository.AddUserEmailAddressAsync(entity);
+            });
+
+            if (result.Succeeded)
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(entity)));
+            return result;
+        }
+
+        public virtual async Task<IdentityResult> UpdateUserEmailAddressAsync(UserEmailAddressDto dto)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(dto.EmailAddressId);
+            if (row == null || row.UserId != dto.UserId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, dto.EmailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+
+            var email = dto.Email.Trim();
+            var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
+            {
+                // Excludes the row being edited, so re-saving a row with its own address still works.
+                var duplicate = await CheckSameUserDuplicateAsync(dto.UserId, email, dto.EmailAddressId);
+                if (duplicate != null) return duplicate;
+
+                var conflict = await ResolveCrossAccountConflictAsync(dto.UserId, email);
+                if (conflict != null) return conflict;
+
+                row.Email = email;
+                row.EmailConfirmed = true;
+                return await IdentityRepository.UpdateUserEmailAddressAsync(row);
+            });
+
+            if (result.Succeeded)
+            {
+                var persisted = await IdentityRepository.GetUserEmailAddressAsync(dto.EmailAddressId);
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(persisted)));
+            }
+            return result;
+        }
+
+        public virtual async Task<IdentityResult> DeleteUserEmailAddressAsync(UserEmailAddressDto dto)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(dto.EmailAddressId);
+            if (row == null || row.UserId != dto.UserId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, dto.EmailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+
+            if (row.IsPrimary)
+                return IdentityResult.Failed(new IdentityError { Description = IdentityServiceResources.UserEmailAddressPrimaryDelete().Description });
+
+            var result = await IdentityRepository.DeleteUserEmailAddressAsync(dto.EmailAddressId);
+            if (result.Succeeded)
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressDeletedEvent(Mapper.Map<UserEmailAddressDto>(row)));
+            return result;
+        }
+
+        public virtual async Task<IdentityResult> SetPrimaryUserEmailAddressAsync(string userId, string emailAddressId)
+        {
+            var row = await IdentityRepository.GetUserEmailAddressAsync(emailAddressId);
+            if (row == null || row.UserId != userId)
+                throw new UserFriendlyErrorPageException(string.Format(IdentityServiceResources.UserEmailAddressDoesNotExist().Description, emailAddressId), IdentityServiceResources.UserEmailAddressDoesNotExist().Description);
+
+            var result = await IdentityRepository.ExecuteInTransactionAsync(async () =>
+            {
+                // Promotion confirms the row and rewrites Users.Email, so it must pass the same
+                // cross-account ownership check as create/update (review #2).
+                var conflict = await ResolveCrossAccountConflictAsync(userId, row.Email);
+                if (conflict != null) return conflict;
+
+                return await IdentityRepository.SetPrimaryUserEmailAddressAsync(userId, emailAddressId);
+            });
+
+            if (result.Succeeded)
+            {
+                var updatedRow = await IdentityRepository.GetUserEmailAddressAsync(emailAddressId);
+                await AuditEventLogger.LogEventAsync(new UserEmailAddressSavedEvent(Mapper.Map<UserEmailAddressDto>(updatedRow)));
+            }
+            return result;
+        }
+
+        // IdentityServer owns this table and reads it with SingleOrDefault on the non-unique Email
+        // column (EmailAddressManager.GetEmailAsync), which is on the login-by-email, confirmation,
+        // password-reset and registration-unicity paths. A second row for the same address on the
+        // SAME user turns each of those into an InvalidOperationException, so the address must be
+        // unique per user. ResolveCrossAccountConflictAsync only examines other accounts
+        // (r.UserId != userId); this closes the same-account half.
+        private async Task<IdentityResult> CheckSameUserDuplicateAsync(string userId, string email, string excludeEmailAddressId = null)
+        {
+            var rows = await IdentityRepository.GetUserEmailAddressesByEmailAsync(email);
+            if (rows.Any(r => r.UserId == userId && r.Id != excludeEmailAddressId))
+                return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressDuplicate().Description, email) });
+
+            return null;
+        }
+
+        // First-to-confirm semantics live in the repository
+        // (TryResolveCrossAccountEmailConflictAsync) so the profile-edit path enforces the identical
+        // policy instead of a second copy of it (review round-3). This wrapper only turns the outcome into
+        // a localized error. Returns null when the address is free to use.
+        private async Task<IdentityResult> ResolveCrossAccountConflictAsync(string userId, string email)
+        {
+            var resolved = await IdentityRepository.TryResolveCrossAccountEmailConflictAsync(userId, email);
+            if (!resolved)
+                return IdentityResult.Failed(new IdentityError { Description = string.Format(IdentityServiceResources.UserEmailAddressConflict().Description, email) });
+
+            return null;
         }
     }
 }
