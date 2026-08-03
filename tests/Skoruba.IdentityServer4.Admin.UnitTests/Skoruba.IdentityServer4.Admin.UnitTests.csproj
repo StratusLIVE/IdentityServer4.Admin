@@ -13,6 +13,11 @@
 		<!-- Relational provider for the transaction-rollback tests: ExecuteInTransactionAsync
 		     short-circuits on the InMemory provider, so rollback can only be proven here. -->
 		<PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.10" />
+		<!-- StratusLive.PlatformCore requires >= 9.0.12; the EF Core 8.x graph above resolves
+		     Logging.Abstractions lower, which NuGet reports as NU1605. Pin it directly (the fix
+		     NU1605 itself prescribes) rather than moving EF Core off 8.0.10, which the rest of
+		     the solution is pinned to. -->
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.12" />
 		<PackageReference Include="Moq" Version="4.20.70" />
 		<PackageReference Update="Microsoft.NET.Test.Sdk" Version="17.10.0" />
 		<PackageReference Update="xunit" Version="2.8.1" />
@@ -35,3 +40,4 @@
 	</ItemGroup>
 
 </Project>
+
