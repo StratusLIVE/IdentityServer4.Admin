@@ -20,7 +20,7 @@
 		     Logging.Abstractions lower, which NuGet reports as NU1605. Pin it directly (the fix
 		     NU1605 itself prescribes) rather than moving off EF Core 8.0.10, which the whole
 		     solution still pins (ASP.NET Core servicing moved to 8.0.30; EF Core did not). -->
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.12" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.21" />
 		<PackageReference Include="Moq" Version="4.20.70" />
 		<PackageReference Update="Microsoft.NET.Test.Sdk" Version="17.10.0" />
 		<PackageReference Update="xunit" Version="2.8.1" />
